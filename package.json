@@ -1,0 +1,38 @@
+{
+  "name": "claude-pet",
+  "version": "1.0.0",
+  "description": "Desktop pet that reacts to Claude Code hook events - skin it with any GIF pack (e.g. from codex-pets.net)",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --mac dir --arm64",
+    "dist:x64": "electron-builder --mac dir --x64"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^32.0.0",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "com.claudepet.app",
+    "productName": "ClaudePet",
+    "files": [
+      "main.js",
+      "preload.js",
+      "nimbus-keywords.js",
+      "index.html",
+      "style.css",
+      "src/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "mac": {
+      "icon": "build/icon.icns",
+      "target": "dir",
+      "category": "public.app-category.entertainment"
+    }
+  }
+}

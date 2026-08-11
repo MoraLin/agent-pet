@@ -1,0 +1,136 @@
+html, body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+  user-select: none;
+}
+
+#stage {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+#dino-wrap {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 96px;
+  height: 96px;
+  will-change: transform;
+  cursor: grab;
+}
+
+#dino-wrap:active {
+  cursor: grabbing;
+}
+
+#dino {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  image-rendering: pixelated;
+  display: block;
+  transform-origin: center bottom;
+}
+
+#emote {
+  position: absolute;
+  top: -22px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 26px;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+  pointer-events: none;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+#emote.show {
+  opacity: 1;
+}
+
+/* project-name label tacked onto an alert emoji (e.g. "❗claude-pet") -
+   plain emoji don't need this, but readable text over an arbitrary desktop
+   background does. */
+#emote.emote-label {
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  padding: 3px 8px;
+  border-radius: 10px;
+  text-shadow: none;
+}
+
+/* counter the parent's mirror flip so the emote glyph isn't backwards */
+#dino-wrap.mirrored #emote {
+  transform: translateX(-50%) scaleX(-1);
+}
+
+/* sleeping Z drifts up and fades, instead of sitting static */
+@keyframes float-emote {
+  0% { transform: translateX(-50%) translateY(0); opacity: 0; }
+  20% { opacity: 1; }
+  100% { transform: translateX(-50%) translateY(-22px); opacity: 0; }
+}
+
+#emote.emote-float {
+  animation: float-emote 2s ease-in infinite;
+}
+
+@keyframes float-emote-flipped {
+  0% { transform: translateX(-50%) scaleX(-1) translateY(0); opacity: 0; }
+  20% { opacity: 1; }
+  100% { transform: translateX(-50%) scaleX(-1) translateY(-22px); opacity: 0; }
+}
+
+#dino-wrap.mirrored #emote.emote-float {
+  animation-name: float-emote-flipped;
+}
+
+/* idle: slow gentle bob */
+@keyframes bob-idle {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+
+/* sleep: slow breathing, artwork itself shows the lying-down pose */
+@keyframes breathe-sleep {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+}
+
+/* greet: two happy hops */
+@keyframes hop-greet {
+  0%, 100% { transform: translateY(0); }
+  25% { transform: translateY(-14px); }
+  50% { transform: translateY(0); }
+  75% { transform: translateY(-14px); }
+}
+
+/* reading: slow head tilt */
+@keyframes tilt-reading {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(-8deg); }
+}
+
+.anim-idle { animation: bob-idle 2.6s ease-in-out infinite; }
+.anim-walk { animation: none; }
+.anim-sleep { animation: breathe-sleep 3.5s ease-in-out infinite; }
+.anim-greet { animation: hop-greet 1.2s ease-in-out 2; }
+.anim-working { animation: none; }
+.anim-reading { animation: tilt-reading 1.6s ease-in-out infinite; }
+.anim-wave { animation: none; }
+.anim-sad { animation: none; }
+.anim-pet { animation: none; }
+.anim-jump { animation: none; }
+.anim-success { animation: none; }
+.anim-impatient { animation: none; }
+.anim-run { animation: none; }
+/* pat: held while a hand pets the head; --sway-angle is driven live by JS
+   as the mouse moves left/right during the hold. */
+.anim-pat { animation: none; transform: rotate(var(--sway-angle, 0deg)); }

@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="stage">
+    <div id="dino-wrap">
+      <div id="emote"></div>
+      <!-- src is set by renderer.js via resolveGif('idle') on load - a
+           hardcoded path here would go stale every time the character skin
+           in src/assets/nimbus/ is swapped. -->
+      <img id="dino" src="" alt="dino" />
+    </div>
+  </div>
+  <script src="src/renderer.js"></script>
+  <script src="src/anims/jump.js"></script>
+  <script src="src/anims/run.js"></script>
+</body>
+</html>
