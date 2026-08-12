@@ -3,7 +3,7 @@ const http = require('http');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
-const { REQUIRED: REQUIRED_NIMBUS_KEYWORDS, matchesKeyword } = require('./nimbus-keywords');
+const { REQUIRED: REQUIRED_SKIN_KEYWORDS, matchesKeyword } = require('./skin-keywords');
 
 const PORT = 9876;
 
@@ -16,22 +16,34 @@ const PORT = 9876;
 // packaged builds (unlike LOG_PATH below) - there's no dev convenience
 // reason to special-case it, and testing the import feature in dev this way
 // actually exercises the real path.
-const NIMBUS_DEFAULT_DIR = path.join(__dirname, 'src', 'assets', 'nimbus');
-const NIMBUS_LIVE_DIR = path.join(app.getPath('userData'), 'nimbus');
+const SKIN_DEFAULT_DIR = path.join(__dirname, 'src', 'assets', 'skin');
+const SKIN_LIVE_DIR = path.join(app.getPath('userData'), 'skin');
 // preload.js can't call app.getPath() itself (that's main-process-only) -
 // passed through via env var instead, since preload (sandbox: false) gets a
 // real process.env that mirrors this process's.
-process.env.PET_NIMBUS_DIR = NIMBUS_LIVE_DIR;
+process.env.PET_SKIN_DIR = SKIN_LIVE_DIR;
+
+// One-time migration from the old folder name ("nimbus", pre-rename) to the
+// new one - runs before seeding so an existing user's already-imported skin
+// gets carried over instead of being mistaken for a fresh install and
+// silently replaced by the bundled default.
+function migrateLegacyNimbusDirIfNeeded() {
+  const legacyDir = path.join(app.getPath('userData'), 'nimbus');
+  if (fs.existsSync(legacyDir) && !fs.existsSync(SKIN_LIVE_DIR)) {
+    fs.renameSync(legacyDir, SKIN_LIVE_DIR);
+  }
+}
 
 // Only seeds on first launch (or if the user's copy somehow got wiped) -
 // never re-syncs over an existing live copy, since that would stomp on
 // whatever skin the user last imported.
-function seedNimbusDirIfNeeded() {
-  if (fs.existsSync(NIMBUS_LIVE_DIR) && fs.readdirSync(NIMBUS_LIVE_DIR).length > 0) return;
-  fs.mkdirSync(NIMBUS_LIVE_DIR, { recursive: true });
-  for (const file of fs.readdirSync(NIMBUS_DEFAULT_DIR)) {
+function seedSkinDirIfNeeded() {
+  migrateLegacyNimbusDirIfNeeded();
+  if (fs.existsSync(SKIN_LIVE_DIR) && fs.readdirSync(SKIN_LIVE_DIR).length > 0) return;
+  fs.mkdirSync(SKIN_LIVE_DIR, { recursive: true });
+  for (const file of fs.readdirSync(SKIN_DEFAULT_DIR)) {
     if (!file.toLowerCase().endsWith('.gif')) continue; // skip .DS_Store etc.
-    fs.copyFileSync(path.join(NIMBUS_DEFAULT_DIR, file), path.join(NIMBUS_LIVE_DIR, file));
+    fs.copyFileSync(path.join(SKIN_DEFAULT_DIR, file), path.join(SKIN_LIVE_DIR, file));
   }
 }
 
@@ -74,6 +86,10 @@ let win;
 // doesn't wander on its own between them. See src/renderer.js's
 // setWanderEnabled().
 let wanderEnabled = true;
+// Right-click submenu: how long idle (no real Claude Code activity) before
+// falling asleep. Mirrors src/renderer.js's own default until changed - see
+// setBoredomMs().
+let boredomMs = 90000;
 let permissionPromptStartTime = null;
 let permissionPromptSessionId = null;
 let permissionPromptCwd = null;
@@ -295,7 +311,7 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       // Only the preload script (still fully trusted, local code) needs
-      // this - it uses fs.readdirSync to resolve nimbus gif filenames by
+      // this - it uses fs.readdirSync to resolve skin gif filenames by
       // keyword. The renderer itself stays isolated/non-integrated above.
       sandbox: false,
     },
@@ -315,7 +331,7 @@ function createWindow() {
     }
   });
 
-  // Not .once(): a skin import (see importNimbusSkin()) calls win.reload(),
+  // Not .once(): a skin import (see importSkin()) calls win.reload(),
   // which fires 'did-finish-load' again - the freshly-reloaded page needs
   // the same menu-bar-offset-corrected viewW/viewH as the very first load,
   // not just the raw (uncorrected) window.innerWidth/innerHeight fallback.
@@ -351,7 +367,7 @@ function setupInteraction() {
     sendPetInit({ screenX, screenY });
   });
 
-  async function importNimbusSkin() {
+  async function importSkin() {
     if (!win || win.isDestroyed()) return;
     // Any dialog shown on top of `win` (the folder picker below, or an
     // error alert) can leave the window's always-on-top level reset once it
@@ -372,7 +388,7 @@ function setupInteraction() {
         return;
       }
 
-      const missing = REQUIRED_NIMBUS_KEYWORDS.filter(
+      const missing = REQUIRED_SKIN_KEYWORDS.filter(
         (keyword) => !gifFiles.some((f) => matchesKeyword(f, keyword))
       );
       if (missing.length > 0) {
@@ -388,11 +404,11 @@ function setupInteraction() {
         // Replace, not merge - a stale leftover from the old skin could
         // collide with the new one's own keyword match (e.g. an old
         // running.gif left behind).
-        for (const file of fs.readdirSync(NIMBUS_LIVE_DIR)) {
-          fs.unlinkSync(path.join(NIMBUS_LIVE_DIR, file));
+        for (const file of fs.readdirSync(SKIN_LIVE_DIR)) {
+          fs.unlinkSync(path.join(SKIN_LIVE_DIR, file));
         }
         for (const file of gifFiles) {
-          fs.copyFileSync(path.join(sourceDir, file), path.join(NIMBUS_LIVE_DIR, file));
+          fs.copyFileSync(path.join(sourceDir, file), path.join(SKIN_LIVE_DIR, file));
         }
       } catch (err) {
         dialog.showMessageBoxSync(win, { type: 'error', message: '套用新外觀時發生錯誤', detail: String(err) });
@@ -403,6 +419,11 @@ function setupInteraction() {
     } finally {
       if (win && !win.isDestroyed()) applyAlwaysOnTop(win);
     }
+  }
+
+  function setBoredomMs(ms) {
+    boredomMs = ms;
+    win.webContents.send('pet-set-boredom-ms', ms);
   }
 
   ipcMain.on('pet-show-context-menu', () => {
@@ -425,7 +446,7 @@ function setupInteraction() {
     //     { label: '出錯', click: preview('sad') },
     //     { label: '不耐煩', click: preview('impatient') },
     //     { label: '跑步', click: preview('run') },
-    //     // 摸摸/開心(anim-success) 還沒有對應的 nimbus GIF,觸發後畫面上跟
+    //     // 摸摸/開心(anim-success) 還沒有對應的 skin GIF,觸發後畫面上跟
     //     // 待機沒有分別 - 暫時把預覽選項藏起來，等有素材了再打開。吃東西/玩球/
     //     // 打哈欠這幾個花拳已經整個刪掉了，不會再出現。
     //     // { label: '開心', click: preview('happy') },
@@ -435,18 +456,28 @@ function setupInteraction() {
     // { type: 'separator' },
     const menu = Menu.buildFromTemplate([
       {
-        label: '匯入寵物外觀...',
-        click: importNimbusSkin,
+        label: '匯入寵物外觀... Import Skin...',
+        click: importSkin,
       },
       { type: 'separator' },
       {
-        label: '閒置自動走動',
+        label: '閒置自動走動 Auto-Wander',
         type: 'checkbox',
         checked: wanderEnabled,
         click: () => {
           wanderEnabled = !wanderEnabled;
           win.webContents.send('pet-set-wander', wanderEnabled);
         },
+      },
+      {
+        label: '睡著時間 Sleep Timer',
+        submenu: [
+          { label: '30 秒 30s', type: 'radio', checked: boredomMs === 30000, click: () => setBoredomMs(30000) },
+          { label: '90 秒(預設) 90s (Default)', type: 'radio', checked: boredomMs === 90000, click: () => setBoredomMs(90000) },
+          { label: '3 分鐘 3min', type: 'radio', checked: boredomMs === 180000, click: () => setBoredomMs(180000) },
+          { label: '5 分鐘 5min', type: 'radio', checked: boredomMs === 300000, click: () => setBoredomMs(300000) },
+          { label: '永不睡著 Never', type: 'radio', checked: boredomMs === Infinity, click: () => setBoredomMs(Infinity) },
+        ],
       },
       { type: 'separator' },
       {
@@ -599,7 +630,7 @@ app.whenReady().then(() => {
     app.dock.hide();
   }
   configureClaudeHooks();
-  seedNimbusDirIfNeeded();
+  seedSkinDirIfNeeded();
   createWindow();
   setupInteraction();
   startServer();

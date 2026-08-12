@@ -19,7 +19,7 @@
     "files": [
       "main.js",
       "preload.js",
-      "nimbus-keywords.js",
+      "skin-keywords.js",
       "index.html",
       "style.css",
       "src/**/*",

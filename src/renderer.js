@@ -5,7 +5,7 @@ const emoteEl = document.getElementById('emote');
 const WRAP_SIZE = 96;
 const WALK_SPEED = 40; // px per second, casual wandering
 const DASH_SPEED = 1400; // px per second, rushing to the corner
-const BOREDOM_MS = 90000; // idle time before falling asleep
+let boredomMs = 90000; // idle time before falling asleep - see setBoredomMs()
 
 const GROUND_MARGIN = 12;
 const CORNER_MARGIN = 8;
@@ -47,19 +47,19 @@ let autoSubTimeoutId = null;
 // wander loop. Real hook events still play normally either way.
 let wanderEnabled = true;
 
-// Resolve a nimbus gif by keyword (e.g. 'idle', 'failed') instead of a
+// Resolve a skin gif by keyword (e.g. 'idle', 'failed') instead of a
 // hardcoded filename, so swapping in a whole new character skin - a
 // differently-prefixed gif set, e.g. pingu-idle.gif instead of
-// nimbus-idle.gif - just means dropping the new files into
-// src/assets/nimbus/, no renaming or code changes needed. Falls back to the
-// nimbus-prefixed name if petAPI isn't available (e.g. index.html opened
+// skin-idle.gif - just means dropping the new files into
+// src/assets/skin/, no renaming or code changes needed. Falls back to the
+// skin-prefixed name if petAPI isn't available (e.g. index.html opened
 // directly in a browser instead of through Electron).
 function resolveGif(keyword, required = true) {
   if (window.petAPI && window.petAPI.resolveGif) return window.petAPI.resolveGif(keyword, required);
-  return `src/assets/nimbus/nimbus-${keyword}.gif`;
+  return `src/assets/skin/skin-${keyword}.gif`;
 }
 
-// idle/greet/reading fall through to the same standing pose - nimbus-idle
+// idle/greet/reading fall through to the same standing pose - skin-idle
 // is a looping GIF, so it plays continuously even though only one src is set.
 const STAND_SRC = resolveGif('idle');
 const READING_SRC = resolveGif('review');
@@ -90,7 +90,7 @@ let currentAnimCls = null;
 const EMOTE_TOP_DEFAULT = '-22px';
 const EMOTE_LEFT_DEFAULT = '50%';
 
-// There's no separate walk pose in the nimbus set, only running - so casual
+// There's no separate walk pose in the skin set, only running - so casual
 // wandering (anim-walk) reuses the same direction-specific running gif as an
 // actual dash (anim-run). Sleep has its own look-left/right-side pair for
 // the same reason. Unlike run (which locks direction for one straight dash),
@@ -122,7 +122,7 @@ function setAnim(cls) {
     // old reversed-art frames - pick the matching one instead of mirroring.
     setDirectionalGif();
   } else if (cls === 'anim-wave') {
-    // Nimbus GIFs loop on their own once assigned - no interval needed.
+    // Skin GIFs loop on their own once assigned - no interval needed.
     dinoImg.src = WAVE_SRC;
   } else if (cls === 'anim-jump') {
     dinoImg.src = JUMP_SRC;
@@ -143,7 +143,7 @@ function setAnim(cls) {
     // direction, so unlike run/walk/sleep it doesn't need the left/right pick.
     dinoImg.src = WORKING_SRC;
   } else {
-    // pet/pat/success (and idle/greet) have no nimbus gif - their timers and
+    // pet/pat/success (and idle/greet) have no skin gif - their timers and
     // hook logic below are untouched, they're just not routed to a distinct
     // pose here, so they fall through to the idle gif instead.
     dinoImg.src = STAND_SRC;
@@ -223,17 +223,29 @@ function scheduleAutoSub() {
 // idle flourishes (jump/run/eat) are themselves part of being bored and
 // must not keep the clock from ever reaching BOREDOM_MS.
 function scheduleBoredom() {
-  if (boredomTimeoutId) return;
+  if (boredomTimeoutId || boredomMs === Infinity) return;
   boredomTimeoutId = setTimeout(() => {
     boredomTimeoutId = null;
     enterSleep();
-  }, BOREDOM_MS);
+  }, boredomMs);
 }
 
 function resetBoredom() {
   if (boredomTimeoutId) {
     clearTimeout(boredomTimeoutId);
     boredomTimeoutId = null;
+  }
+}
+
+// Right-click "睡著時間" submenu. Only restarts a countdown that's actually
+// pending (mirrors resetBoredom/scheduleBoredom's own idempotency) - if none
+// is running right now (e.g. already asleep, or mid-override without
+// keepBoredom), the new value just takes effect next time one is scheduled.
+function setBoredomMs(ms) {
+  boredomMs = ms;
+  if (boredomTimeoutId) {
+    resetBoredom();
+    scheduleBoredom();
   }
 }
 
@@ -522,6 +534,10 @@ if (window.petAPI && window.petAPI.onPreview) {
 
 if (window.petAPI && window.petAPI.onSetWander) {
   window.petAPI.onSetWander(setWanderEnabled);
+}
+
+if (window.petAPI && window.petAPI.onSetBoredomMs) {
+  window.petAPI.onSetBoredomMs(setBoredomMs);
 }
 
 if (window.petAPI && window.petAPI.onInit) {
