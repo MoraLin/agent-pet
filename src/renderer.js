@@ -75,12 +75,16 @@ const WORKING_SRC = resolveGif('running');
 // its regular idle pose instead of the app refusing to start.
 const SLEEP_LEFT_SRC = resolveGif('look-left-side', false) || STAND_SRC;
 const SLEEP_RIGHT_SRC = resolveGif('look-right-side', false) || STAND_SRC;
+// Same optional-fallback deal as sleep - not every gif pack has a dedicated
+// "success" pose, so a pack missing it just shows the idle gif on Stop
+// instead of the app refusing to start.
+const SUCCESS_SRC = resolveGif('success', false) || STAND_SRC;
 let currentAnimCls = null;
 
 // Warm the browser's image cache up front so cycling frames during an
 // animation doesn't hit disk/decode latency and show a stale frame.
 // Jump/run each warm their own frames in their own file.
-[STAND_SRC, READING_SRC, WAVE_SRC, SAD_SRC, IMPATIENT_SRC, WORKING_SRC, SLEEP_LEFT_SRC, SLEEP_RIGHT_SRC].forEach((src) => {
+[STAND_SRC, READING_SRC, WAVE_SRC, SAD_SRC, IMPATIENT_SRC, WORKING_SRC, SLEEP_LEFT_SRC, SLEEP_RIGHT_SRC, SUCCESS_SRC].forEach((src) => {
   const img = new Image();
   img.src = src;
 });
@@ -142,10 +146,16 @@ function setAnim(cls) {
     // plain busy-loop instead. It's parked at the corner with no travel
     // direction, so unlike run/walk/sleep it doesn't need the left/right pick.
     dinoImg.src = WORKING_SRC;
+  } else if (cls === 'anim-success') {
+    dinoImg.src = SUCCESS_SRC;
+  } else if (cls === 'anim-eat') {
+    dinoImg.src = EAT_SRC;
+  } else if (cls === 'anim-play') {
+    dinoImg.src = PLAY_SRC;
   } else {
-    // pet/pat/success (and idle/greet) have no skin gif - their timers and
-    // hook logic below are untouched, they're just not routed to a distinct
-    // pose here, so they fall through to the idle gif instead.
+    // pet/pat (and idle/greet) have no skin gif - their timers and hook
+    // logic below are untouched, they're just not routed to a distinct pose
+    // here, so they fall through to the idle gif instead.
     dinoImg.src = STAND_SRC;
   }
   dinoImg.className = cls;
@@ -249,7 +259,7 @@ function setBoredomMs(ms) {
   }
 }
 
-// jump/run/eat/ball/yawn each define their own frames, entry function, and
+// jump/run/eat/play each define their own frames, entry function, and
 // scheduleRandomX() in src/anims/<name>.js - see ANIMATION_GUIDELINES.md.
 // They're loaded as plain scripts after this one, so they share this file's
 // top-level scope (mode, x/y/dir, setAnim, enterAuto, etc.) directly.
