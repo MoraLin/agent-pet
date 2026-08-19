@@ -16,9 +16,11 @@ const REQUIRED = [
   'failed',
 ];
 
-// Not every gif pack bothers with a dedicated sleep pose - callers fall
-// back to another gif (see resolveGif's required=false) if these are absent.
-const OPTIONAL = ['look-left-side', 'look-right-side'];
+// Not every gif pack bothers with a dedicated sleep/success/eating/playing
+// pose - callers fall back to another gif, or (for eat/play) just never
+// trigger the flourish at all, if these are absent (see resolveGif's
+// required=false).
+const OPTIONAL = ['look-left-side', 'look-right-side', 'success', 'eating', 'playing'];
 
 // A hyphen must sit right before the keyword - "running" and "running-left"
 // legitimately coexist as distinct files, and a character-name prefix can

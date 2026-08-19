@@ -6,7 +6,8 @@
   "scripts": {
     "start": "electron .",
     "dist": "electron-builder --mac dir --arm64",
-    "dist:x64": "electron-builder --mac dir --x64"
+    "dist:x64": "electron-builder --mac dir --x64",
+    "dist:win": "electron-builder --win portable --x64"
   },
   "license": "MIT",
   "devDependencies": {
@@ -33,6 +34,10 @@
       "icon": "build/icon.icns",
       "target": "dir",
       "category": "public.app-category.entertainment"
+    },
+    "win": {
+      "icon": "build/icon.ico",
+      "target": "portable"
     }
   }
 }

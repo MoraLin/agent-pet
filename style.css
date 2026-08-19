@@ -131,6 +131,8 @@ html, body {
 .anim-success { animation: none; }
 .anim-impatient { animation: none; }
 .anim-run { animation: none; }
+.anim-eat { animation: none; }
+.anim-play { animation: none; }
 /* pat: held while a hand pets the head; --sway-angle is driven live by JS
    as the mouse moves left/right during the hold. */
 .anim-pat { animation: none; transform: rotate(var(--sway-angle, 0deg)); }

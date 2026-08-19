@@ -21,22 +21,22 @@
 
 早期版本(還在 git 歷史/舊 commit 裡能找到)是每個動作一組 PNG 逐格圖(`src/assets/<name>/1.png ~ 6.png`),用 `setInterval` 手動切換 `<img src>` 播放。**這套 PNG 逐格系統已經整個拆除**——現在每個動作都是一個會自己循環播放的 GIF,不需要任何手動切幀的程式碼。
 
-- **`src/assets/nimbus/` 只是出廠預設值,不是實際在讀的地方**:App 實際讀取(跟「匯入寵物外觀」寫入)的是 `app.getPath('userData')/nimbus/`(`main.js` 算出來存在 `NIMBUS_LIVE_DIR`,這台機器上是 `~/Library/Application Support/claude-pet/nimbus/`),因為打包後 `src/assets/nimbus/`(`NIMBUS_DEFAULT_DIR`)在唯讀的 `app.asar` 裡面,使用者匯入新外觀時沒地方寫。`seedNimbusDirIfNeeded()` 只在這個使用者資料夾**不存在或是空的**時(通常就是第一次啟動)把 `NIMBUS_DEFAULT_DIR` 的內容複製過去當起始值,之後就不會再自動同步——換句話說,改動專案裡 `src/assets/nimbus/` 的檔案,**不會**反映到已經跑過一次的使用者身上,只有全新安裝或使用者資料夾被清掉才會重新吃到新的預設值。
-  - `preload.js` 沒辦法直接呼叫 `app.getPath()`(那是 main process 專屬的 API),所以 `main.js` 算好 `NIMBUS_LIVE_DIR` 後,在建立視窗前用 `process.env.PET_NIMBUS_DIR = NIMBUS_LIVE_DIR` 傳過去,`preload.js` 讀這個環境變數(因為 `sandbox: false`,preload 有一份會反映這個 process 的 `process.env`)。
-- **從檔名「尾端」比對關鍵字,不是切掉第一個 `-` 之前的東西**:`nimbus-keywords.js`(專案根目錄,`main.js`/`preload.js` 都會 `require`,只有一份定義,避免兩邊各自維護一套一樣的邏輯)的 `matchesKeyword(filename, keyword)` 判斷檔名去掉副檔名後**以 `-<keyword>` 結尾**(或整個檔名就等於 `keyword`,沒有前綴的極端情況)。一開始寫成「切掉第一個 `-` 之前的前綴」,後來發現角色名稱前綴自己也可能帶 `-`(例如 `yier-bubu-failed.gif`——前綴是 `yier-bubu`,不是 `yier`),切第一個 `-` 會把 `bubu-failed` 當成關鍵字去比對,永遠對不上——GIF 包作者要怎麼命名前綴我們無法控制,只有「關鍵字本身在檔名尾端」這件事是可以依賴的,所以改成從尾端比對。
+- **`src/assets/skin/` 只是出廠預設值,不是實際在讀的地方**:App 實際讀取(跟「匯入寵物外觀」寫入)的是 `app.getPath('userData')/skin/`(`main.js` 算出來存在 `SKIN_LIVE_DIR`,這台機器上是 `~/Library/Application Support/claude-pet/skin/`),因為打包後 `src/assets/skin/`(`SKIN_DEFAULT_DIR`)在唯讀的 `app.asar` 裡面,使用者匯入新外觀時沒地方寫。`seedSkinDirIfNeeded()` 只在這個使用者資料夾**不存在或是空的**時(通常就是第一次啟動)把 `SKIN_DEFAULT_DIR` 的內容複製過去當起始值,之後就不會再自動同步——換句話說,改動專案裡 `src/assets/skin/` 的檔案,**不會**反映到已經跑過一次的使用者身上,只有全新安裝或使用者資料夾被清掉才會重新吃到新的預設值。
+  - `preload.js` 沒辦法直接呼叫 `app.getPath()`(那是 main process 專屬的 API),所以 `main.js` 算好 `SKIN_LIVE_DIR` 後,在建立視窗前用 `process.env.PET_SKIN_DIR = SKIN_LIVE_DIR` 傳過去,`preload.js` 讀這個環境變數(因為 `sandbox: false`,preload 有一份會反映這個 process 的 `process.env`)。
+- **從檔名「尾端」比對關鍵字,不是切掉第一個 `-` 之前的東西**:`skin-keywords.js`(專案根目錄,`main.js`/`preload.js` 都會 `require`,只有一份定義,避免兩邊各自維護一套一樣的邏輯)的 `matchesKeyword(filename, keyword)` 判斷檔名去掉副檔名後**以 `-<keyword>` 結尾**(或整個檔名就等於 `keyword`,沒有前綴的極端情況)。一開始寫成「切掉第一個 `-` 之前的前綴」,後來發現角色名稱前綴自己也可能帶 `-`(例如 `yier-bubu-failed.gif`——前綴是 `yier-bubu`,不是 `yier`),切第一個 `-` 會把 `bubu-failed` 當成關鍵字去比對,永遠對不上——GIF 包作者要怎麼命名前綴我們無法控制,只有「關鍵字本身在檔名尾端」這件事是可以依賴的,所以改成從尾端比對。
   - 比對時關鍵字前面一定要有一個 `-` 做邊界,不能只看「結尾字母一樣」——`running` 跟 `running-left`/`running-right` 是三個並存、意義不同的檔案(一個是原地忙碌用的沒有方向性的圖,兩個是有方向的閒晃/衝刺圖),`xxx-running-left.gif` 結尾的字母也含有 `running`(在 `-left` 前面那段),但它結尾其實是 `-left`,不是 `-running`,所以不會被關鍵字 `running` 誤配到。
-- **`preload.js` 的 `resolveGif(keyword, required = true)`**:`fs.readdirSync(NIMBUS_DIR)` 找符合 `matchesKeyword` 的檔案,回傳的是**絕對路徑**(`path.join(NIMBUS_DIR, match)`),不是相對於 `index.html` 的字串——因為 `NIMBUS_DIR` 現在在 App 本體資料夾外面(`userData`),相對路徑已經到不了那裡。找不到對應關鍵字的檔案,預設會直接 `throw`,讓 App 啟動失敗——這是刻意的,換了一組不完整的 GIF 包要馬上發現,而不是看到某個動作變成空白或卡在上一張圖才後知後覺。目前用到的完整關鍵字清單(`REQUIRED`/`OPTIONAL`)見 `nimbus-keywords.js` 跟 `README.md`。
-  - 少數關鍵字是**可以省略**的(目前只有 `look-left-side`/`look-right-side`,不是每組 GIF 包都會特別畫睡覺姿勢),呼叫時傳 `resolveGif('look-left-side', false)`,找不到就回傳 `null` 而不是 throw,呼叫端自己接 `|| <fallback source>` 補上替代圖——新增這種「可省略」的關鍵字要放進 `nimbus-keywords.js` 的 `OPTIONAL`(不是 `REQUIRED`),並在 `README.md` 的關鍵字表裡標註清楚,不然使用者會誤以為漏放了必要檔案。
-- **為什麼要 `sandbox: false`**:`fs`/`path` 只能在 `preload.js` 裡用,因為 `main.js` 的 `webPreferences` 把它的 `sandbox` 設成 `false`(渲染器本身仍然是 `contextIsolation: true` + `nodeIntegration: false`,沒有放寬)。`resolveGif` 透過 `contextBridge.exposeInMainWorld('petAPI', { resolveGif, ... })` 曝露給 renderer,`src/renderer.js`/`src/anims/*.js` 呼叫的是自己包一層的 `resolveGif(keyword)`(沒有 `window.petAPI` 時 fallback 回寫死的 `src/assets/nimbus/nimbus-<keyword>.gif`,方便直接拿瀏覽器開 `index.html` 快速預覽,不透過 Electron——這條路徑走的是專案裡的出廠預設值,不是 `userData`,純粹是開發時的權宜捷徑)。
-- **「匯入寵物外觀...」右鍵選單(`main.js` 的 `importNimbusSkin()`)**:跳原生的 `dialog.showOpenDialog` 選資料夾 → 用 `nimbus-keywords.js` 的 `REQUIRED` 清單逐一檢查該資料夾的 `.gif` 檔案 → 缺任何一個就 `dialog.showMessageBoxSync` 顯示錯誤、不套用 → 都齊了就清空 `NIMBUS_LIVE_DIR` 再把新資料夾的 `.gif` 複製進去(**整批替換,不是合併**,避免舊皮膚留下的檔案跟新皮膚的關鍵字比對互相干擾)、最後 `win.reload()` 讓畫面立刻套用新外觀。
+- **`preload.js` 的 `resolveGif(keyword, required = true)`**:`fs.readdirSync(SKIN_DIR)` 找符合 `matchesKeyword` 的檔案,回傳的是**絕對路徑**(`path.join(SKIN_DIR, match)`),不是相對於 `index.html` 的字串——因為 `SKIN_DIR` 現在在 App 本體資料夾外面(`userData`),相對路徑已經到不了那裡。找不到對應關鍵字的檔案,預設會直接 `throw`,讓 App 啟動失敗——這是刻意的,換了一組不完整的 GIF 包要馬上發現,而不是看到某個動作變成空白或卡在上一張圖才後知後覺。目前用到的完整關鍵字清單(`REQUIRED`/`OPTIONAL`)見 `skin-keywords.js` 跟 `README.md`。
+  - 少數關鍵字是**可以省略**的(目前只有 `look-left-side`/`look-right-side`,不是每組 GIF 包都會特別畫睡覺姿勢),呼叫時傳 `resolveGif('look-left-side', false)`,找不到就回傳 `null` 而不是 throw,呼叫端自己接 `|| <fallback source>` 補上替代圖——新增這種「可省略」的關鍵字要放進 `skin-keywords.js` 的 `OPTIONAL`(不是 `REQUIRED`),並在 `README.md` 的關鍵字表裡標註清楚,不然使用者會誤以為漏放了必要檔案。
+- **為什麼要 `sandbox: false`**:`fs`/`path` 只能在 `preload.js` 裡用,因為 `main.js` 的 `webPreferences` 把它的 `sandbox` 設成 `false`(渲染器本身仍然是 `contextIsolation: true` + `nodeIntegration: false`,沒有放寬)。`resolveGif` 透過 `contextBridge.exposeInMainWorld('petAPI', { resolveGif, ... })` 曝露給 renderer,`src/renderer.js`/`src/anims/*.js` 呼叫的是自己包一層的 `resolveGif(keyword)`(沒有 `window.petAPI` 時 fallback 回寫死的 `src/assets/skin/skin-<keyword>.gif`,方便直接拿瀏覽器開 `index.html` 快速預覽,不透過 Electron——這條路徑走的是專案裡的出廠預設值,不是 `userData`,純粹是開發時的權宜捷徑)。
+- **「匯入寵物外觀...」右鍵選單(`main.js` 的 `importSkin()`)**:跳原生的 `dialog.showOpenDialog` 選資料夾 → 用 `skin-keywords.js` 的 `REQUIRED` 清單逐一檢查該資料夾的 `.gif` 檔案 → 缺任何一個就 `dialog.showMessageBoxSync` 顯示錯誤、不套用 → 都齊了就清空 `SKIN_LIVE_DIR` 再把新資料夾的 `.gif` 複製進去(**整批替換,不是合併**,避免舊皮膚留下的檔案跟新皮膚的關鍵字比對互相干擾)、最後 `win.reload()` 讓畫面立刻套用新外觀。
   - `win.reload()` 會重新觸發 `'did-finish-load'`,所以 `createWindow()` 裡送 `pet-init`(校正過選單列偏移量的正確 `viewW`/`viewH`)的那個監聽器**不能用 `.once()`**,要用 `.on()`,不然重新載入後量到的會是沒校正過的 `window.innerWidth`/`innerHeight`,寵物閒晃範圍會算錯。這個修正順帶也讓 renderer crash 後的自動重載(`render-process-gone` 那段)一樣拿得到正確尺寸,以前那個情境其實也漏了這個修正。
-- **換角色皮膚不用改任何程式碼**:使用者用右鍵選單匯入即可(見 `README.md`);開發模式想手動換,直接把新的一組 GIF 丟進 `src/assets/nimbus/`,只影響*下一次全新啟動*(空白使用者資料夾)的預設值,不會覆蓋已經在跑的 `userData` 版本。
+- **換角色皮膚不用改任何程式碼**:使用者用右鍵選單匯入即可(見 `README.md`);開發模式想手動換,直接把新的一組 GIF 丟進 `src/assets/skin/`,只影響*下一次全新啟動*(空白使用者資料夾)的預設值,不會覆蓋已經在跑的 `userData` 版本。
 
 ## 2. 「無聊睡覺」計時器要跟自動閒置動畫脫鉤
 
-`BOREDOM_MS`(閒置多久後睡著,目前 90 秒)是用來偵測「多久沒有真正的外部互動」,不是「多久沒放動畫」。
+`boredomMs`(閒置多久後睡著,預設 90 秒,可從右鍵選單「睡著時間」子選單改成 30 秒/3 分鐘/5 分鐘/永不睡著,見 `main.js` 的 `setBoredomMs()`)是用來偵測「多久沒有真正的外部互動」,不是「多久沒放動畫」。
 
-- **不能**讓 jump / run 這類角色自己隨機觸發的閒置動畫去重置這個計時器(舊版還有 eat / ball / yawn,已經整個刪掉了,現在只剩 jump/run 是這種「自己隨機觸發」的動畫,見第 6 條)。這幾個動畫平均每 5~20 秒左右就會觸發一次,如果每次觸發都把倒數砍掉重練,90 秒幾乎永遠達不到(這就是先前踩到的 bug)。
+- **不能**讓 jump / run / eat / play 這類角色自己隨機觸發的閒置動畫去重置這個計時器(舊版還有 ball / yawn,已經整個刪掉了;eat/play 是後來重新加回來的,一樣屬於這種「自己隨機觸發」的動畫,見第 6 條)。這幾個動畫平均每幾秒到十幾秒左右就會觸發一次,如果每次觸發都把倒數砍掉重練,90 秒幾乎永遠達不到(這就是先前踩到的 bug)。
 - 只有「真正的外部互動」才該重置計時器:
   - Claude Code 的 hook 事件(對話還在進行中)
   - 使用者點擊 / 拖曳摸摸寵物
@@ -116,16 +116,16 @@ Hooks 設定是全域的(`~/.claude/settings.json`),機器上任何 Claude Code 
 
 `src/renderer.js` 是共用的「引擎」(狀態、setAnim/setEmote/setPosition、hook 事件對應、滑鼠互動、無聊睡覺計時器等)。但像 jump / run 這種**自己會隨機觸發、有自己的進場邏輯**的動畫,不要塞進 `renderer.js`,而是拆成獨立檔案 `src/anims/<name>.js`(例如 `src/anims/run.js`),裡面放:`resolveGif()` 常數、`enter<Name>()`(如果有)、`scheduleRandom<Name>()`、檔案最下面自己呼叫一次 `scheduleRandom<Name>()`。
 
-- **`src/anims/` 放「有自己獨立觸發邏輯」的動畫程式碼**(目前只剩 `jump.js`、`run.js`——會自己排隨機計時器、自己決定什麼時候進場),圖片全部集中在 `src/assets/nimbus/`,不再依動畫分子資料夾(舊版是 `src/assets/<name>/` 一個動畫一個資料夾,GIF 化之後已經不需要,一律用第 1 條的關鍵字比對從同一個資料夾找)。
+- **`src/anims/` 放「有自己獨立觸發邏輯」的動畫程式碼**(目前有 `jump.js`、`run.js`、`eat.js`、`play.js`——會自己排隨機計時器、自己決定什麼時候進場),圖片全部集中在 `src/assets/skin/`,不再依動畫分子資料夾(舊版是 `src/assets/<name>/` 一個動畫一個資料夾,GIF 化之後已經不需要,一律用第 1 條的關鍵字比對從同一個資料夾找)。`eat.js`/`play.js` 用的關鍵字(`eating`/`playing`)是**可省略**的(見 `skin-keywords.js` 的 `OPTIONAL`)——`resolveGif(keyword, false)` 找不到就回傳 `null`,`scheduleRandomEat()`/`scheduleRandomPlay()` 一開頭就檢查這個,沒有圖就直接不排計時器,閒置行為跟沒加這個功能以前一模一樣。
 - `index.html` 用**多個 plain `<script>` 標籤**依序載入(`src/renderer.js` 先,`src/anims/*.js` 在後),**不要用** `type="module"`。這個專案沒有 bundler,而多個 classic script 標籤本來就共用同一個頂層語彙作用域(`let`/`const` 互相看得到、也能互相賦值),所以 `src/anims/run.js` 裡可以直接讀寫 `renderer.js` 定義的 `mode`、`x`、`y`、`dir`、`setAnim()`、`enterOverride()`、`resolveGif()` 等,完全不需要 import/export,行為跟全部塞在同一個檔案裡一模一樣。改用 ES module 會被迫把所有直接賦值(`mode = 'run'` 這種)改成呼叫 setter,是不必要的高風險重構。
-- 圖片路徑字串(`resolveGif()` 回傳的 `'src/assets/nimbus/xxx.gif'`)是相對於 `index.html`(專案根目錄)解析的,不是相對於 `.js` 檔案本身的位置。
+- 圖片路徑字串(`resolveGif()` 回傳的 `'src/assets/skin/xxx.gif'`)是相對於 `index.html`(專案根目錄)解析的,不是相對於 `.js` 檔案本身的位置。
 - 純被動播放、沒有獨立觸發邏輯的動畫(working / reading / wave / sad / impatient / sleep / greet / success / pet / pat)**留在 `src/renderer.js` 裡**,不需要為了統一而每個都拆檔案——這些只是一個(或一對方向性的)`resolveGif()` 常數,由 `setAnim()`、`mapHookEvent()`、`previewAnim()` 這三個共用 switch 分派,拆檔案沒有實質好處。
 
 ## 7. 新增一個動畫關鍵字的檢查清單
 
 現在「新增動畫」通常代表「幫某個目前還在用待機圖頂著的狀態(pet/pat/success 等)配上一個真正的 GIF」,不是從零生成一整組素材。步驟:
 
-1. 確認新 GIF 已經放進 `src/assets/nimbus/`(檔名 `<前綴>-<關鍵字>.gif`,關鍵字不要跟現有的任何一個關鍵字構成子字串關係——見第 1 條)。
+1. 確認新 GIF 已經放進 `src/assets/skin/`(檔名 `<前綴>-<關鍵字>.gif`,關鍵字不要跟現有的任何一個關鍵字構成子字串關係——見第 1 條)。
 2. `src/renderer.js` 頂部加一行 `const <NAME>_SRC = resolveGif('<關鍵字>');`(如果是方向性的,像 sleep 那樣宣告 `_LEFT_SRC`/`_RIGHT_SRC` 兩個)。
 3. 加進開頭的 image-warm 陣列(`[STAND_SRC, ...].forEach(...)`),讓它開機就預先載入。
 4. `setAnim()` 裡加一個 `else if (cls === 'anim-<name>')`,設 `dinoImg.src = <NAME>_SRC;`(方向性的話呼叫 `setDirectionalGif()`,並把這個 class 加進 `DIRECTIONAL_GIF_ANIMS`——見第 3 條怎麼判斷要不要加)。
@@ -135,7 +135,7 @@ Hooks 設定是全域的(`~/.claude/settings.json`),機器上任何 Claude Code 
 
 ## 8. 打包成獨立 `.app`,以及 Claude Code hooks 自動設定
 
-`npm run dist`(`electron-builder`)會在 `dist/mac-arm64/ClaudePet.app` 產生一個完整獨立、不需要 Node.js 就能跑的 App,圖示是 `build/icon.icns`(`iconutil` 轉的,原始素材是舊版寵物待機圖 `dino.png`——那張圖跟其他寵物 PNG 一起被刪掉了,但轉好的 `.icns` 還留著繼續用;如果要換成跟現在角色一致的圖示,拿 `src/assets/nimbus/` 裡對應 `idle` 的那張 GIF 截一張靜態幀,重新跑一次 `iconutil` 轉檔即可)。分享給別人只要給這個檔案,不用給整個專案。
+`npm run dist`(`electron-builder`)會在 `dist/mac-arm64/ClaudePet.app` 產生一個完整獨立、不需要 Node.js 就能跑的 App,圖示是 `build/icon.icns`(`iconutil` 轉的一組 `.png`,不是隨便一張圖直接改副檔名;要換圖示就用 `sips` 把來源圖縮成 icns 規格要求的各個尺寸——16/32/64/128/256/512/1024,含 `@2x` 版本——放進一個 `<name>.iconset/` 資料夾,再跑 `iconutil -c icns <name>.iconset -o build/icon.icns`)。分享給別人只要給這個檔案,不用給整個專案。
 
 - **`main.js` 裡的 `configureClaudeHooks()`,每次 App 啟動(不管開發模式還是打包後)都會自動執行**,把必要的 hooks 合併進 `~/.claude/settings.json`(邏輯上跟以前獨立的 `scripts/configure-hooks.js` 一樣——保留其他設定、備份原檔、已設定過就跳過——現在直接內建進 App,不用另外跑腳本或手動編輯)。
 - **打包後 `__dirname` 會指向唯讀的 `app.asar` 檔案內部,寫入會靜默失敗**(被 `logEvent` 的 try/catch 吞掉,不會報錯,只是永遠不會有記錄或設定寫入)——這是實際打包測試時才發現的坑。任何需要寫入檔案的路徑(目前是 `LOG_PATH`),都要用 `app.isPackaged` 判斷:開發模式維持用 `__dirname`(方便直接在專案資料夾裡找),打包後改用 `app.getPath('userData')`(Electron 提供的、保證可寫的每個 App 專屬資料夾)。之後如果新增其他需要寫檔的功能(例如之前討論過的每日提醒設定),也要記得套用同樣的判斷,不要只在開發模式測過就以為打包後也一定沒問題。
