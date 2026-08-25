@@ -21,6 +21,7 @@
       "main.js",
       "preload.js",
       "skin-keywords.js",
+      "codex-hook-forward.js",
       "index.html",
       "style.css",
       "src/**/*",

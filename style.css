@@ -52,10 +52,13 @@ html, body {
   opacity: 1;
 }
 
-/* project-name label tacked onto an alert emoji (e.g. "❗claude-pet") -
+/* project-name label tacked onto an alert (e.g. a source icon + "claude-pet") -
    plain emoji don't need this, but readable text over an arbitrary desktop
    background does. */
 #emote.emote-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-size: 14px;
   font-weight: 600;
   white-space: nowrap;
@@ -64,6 +67,14 @@ html, body {
   padding: 3px 8px;
   border-radius: 10px;
   text-shadow: none;
+}
+
+/* Badges which CLI (Claude Code vs Codex) a hook alert came from - see
+   iconForSource() in renderer.js. */
+.emote-icon {
+  width: 16px;
+  height: 16px;
+  flex: none;
 }
 
 /* counter the parent's mirror flip so the emote glyph isn't backwards */

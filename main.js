@@ -23,6 +23,13 @@ const SKIN_LIVE_DIR = path.join(app.getPath('userData'), 'skin');
 // real process.env that mirrors this process's.
 process.env.PET_SKIN_DIR = SKIN_LIVE_DIR;
 
+// Codex CLI spawns hook commands with plain system `node`, which can't read
+// inside a packaged app's app.asar - so codex-hook-forward.js has to be
+// copied out to a real path first, same reasoning as SKIN_LIVE_DIR above.
+// Unlike the skin folder, this file is never user-edited, so it's re-copied
+// on every launch to always match the running app version.
+const CODEX_FORWARD_SCRIPT_LIVE = path.join(app.getPath('userData'), 'codex-hook-forward.js');
+
 // One-time migration from the old folder name ("nimbus", pre-rename) to the
 // new one - runs before seeding so an existing user's already-imported skin
 // gets carried over instead of being mistaken for a fresh install and
@@ -93,6 +100,7 @@ let boredomMs = 90000;
 let permissionPromptStartTime = null;
 let permissionPromptSessionId = null;
 let permissionPromptCwd = null;
+let permissionPromptSource = null;
 let impatientTimeoutId = null;
 const IMPATIENT_THRESHOLD_MS = 15000; // 15 seconds
 
@@ -118,6 +126,7 @@ const ALERT_GIVE_UP_MS = 30000; // 30 seconds
 let bashPendingStartTime = null;
 let bashPendingSessionId = null;
 let bashPendingCwd = null;
+let bashPendingSource = null;
 let bashPendingTimeoutId = null;
 const BASH_PENDING_THRESHOLD_MS = 45000; // 45 seconds
 
@@ -132,7 +141,7 @@ const BASH_PENDING_THRESHOLD_MS = 45000; // 45 seconds
 // If more than one session is alerting at once, we cycle the display between
 // them every ALERT_ROTATION_MS instead of only ever showing the first one -
 // otherwise a second session waiting for help would be silently invisible.
-const alertingSessions = new Map(); // session_id -> { cwd }
+const alertingSessions = new Map(); // session_id -> { cwd, source }
 let displayedAlertSessionId = null;
 let alertRotationTimeoutId = null;
 const ALERT_ROTATION_MS = 4000;
@@ -144,7 +153,12 @@ function canDisplay(sessionId) {
 
 function currentAlertPayload() {
   const info = alertingSessions.get(displayedAlertSessionId);
-  return { hook_event_name: 'Notification', notification_type: 'permission_prompt', cwd: info && info.cwd };
+  return {
+    hook_event_name: 'Notification',
+    notification_type: 'permission_prompt',
+    cwd: info && info.cwd,
+    _petSource: info && info.source,
+  };
 }
 
 function showDisplayedAlert() {
@@ -165,9 +179,9 @@ function scheduleAlertRotation() {
   }, ALERT_ROTATION_MS);
 }
 
-function claimAlert(sessionId, cwd) {
+function claimAlert(sessionId, cwd, source) {
   const isNewSession = !alertingSessions.has(sessionId);
-  alertingSessions.set(sessionId, { cwd });
+  alertingSessions.set(sessionId, { cwd, source });
   if (!displayedAlertSessionId) {
     displayedAlertSessionId = sessionId;
     showDisplayedAlert();
@@ -246,6 +260,68 @@ function configureClaudeHooks() {
     logEvent({ source: 'app', event: 'hooks_configured' });
   } catch (err) {
     logEvent({ source: 'app', event: 'hooks_config_write_failed', error: String(err) });
+  }
+}
+
+function seedCodexForwardScript() {
+  fs.mkdirSync(path.dirname(CODEX_FORWARD_SCRIPT_LIVE), { recursive: true });
+  fs.copyFileSync(path.join(__dirname, 'codex-hook-forward.js'), CODEX_FORWARD_SCRIPT_LIVE);
+}
+
+// Same idea as configureClaudeHooks() above, but for ~/.codex/hooks.json.
+// Codex's hook transport only supports spawning a command (fed JSON on
+// stdin), not an HTTP POST like Claude Code's "http" hook type - so this
+// points at codex-hook-forward.js instead of HOOK_URL directly. Limited to
+// the event names we actually turn into pet reactions (see mapHookEvent in
+// src/renderer.js and the PermissionRequest normalization in startServer());
+// Codex also has SessionEnd/SubagentStart/SubagentStop, but nothing here
+// reacts to those yet.
+const CODEX_HOOK_EVENTS = [
+  'SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse',
+  'PermissionRequest', 'Stop', 'PreCompact', 'PostCompact',
+];
+const CODEX_HOOK_MATCHER_EVENTS = new Set(['PreToolUse', 'PostToolUse']);
+
+function configureCodexHooks() {
+  const hooksPath = path.join(os.homedir(), '.codex', 'hooks.json');
+  let config = {};
+  if (fs.existsSync(hooksPath)) {
+    try {
+      config = JSON.parse(fs.readFileSync(hooksPath, 'utf8'));
+    } catch (err) {
+      logEvent({ source: 'app', event: 'codex_hooks_config_parse_failed', error: String(err) });
+      return;
+    }
+  }
+
+  config.hooks = config.hooks || {};
+  const command = `node "${CODEX_FORWARD_SCRIPT_LIVE}"`;
+  const hasOurHook = (entries) => (entries || []).some((entry) =>
+    (entry.hooks || []).some((h) => h.type === 'command' && h.command === command)
+  );
+
+  let changed = false;
+  for (const event of CODEX_HOOK_EVENTS) {
+    if (hasOurHook(config.hooks[event])) continue;
+    const matcher = CODEX_HOOK_MATCHER_EVENTS.has(event) ? '.*' : undefined;
+    const entry = matcher != null
+      ? { matcher, hooks: [{ type: 'command', command, timeout: 5, async: true }] }
+      : { hooks: [{ type: 'command', command, timeout: 5, async: true }] };
+    config.hooks[event] = [...(config.hooks[event] || []), entry];
+    changed = true;
+  }
+
+  if (!changed) return;
+
+  try {
+    fs.mkdirSync(path.dirname(hooksPath), { recursive: true });
+    if (fs.existsSync(hooksPath)) {
+      fs.copyFileSync(hooksPath, `${hooksPath}.bak`);
+    }
+    fs.writeFileSync(hooksPath, JSON.stringify(config, null, 2) + '\n');
+    logEvent({ source: 'app', event: 'codex_hooks_configured' });
+  } catch (err) {
+    logEvent({ source: 'app', event: 'codex_hooks_config_write_failed', error: String(err) });
   }
 }
 
@@ -512,6 +588,15 @@ function startServer() {
       res.writeHead(200).end();
       try {
         const payload = JSON.parse(body);
+        // Codex's hooks engine has no dedicated permission-prompt event like
+        // Claude Code's Notification - PermissionRequest is its equivalent.
+        // Normalizing it into the same shape here means every heuristic below
+        // (timers, alert rotation, mapHookEvent) handles both sources without
+        // being duplicated.
+        if (payload && payload.hook_event_name === 'PermissionRequest') {
+          payload.hook_event_name = 'Notification';
+          payload.notification_type = 'permission_prompt';
+        }
         const eventName = payload && payload.hook_event_name;
 
         if (eventName === 'PostToolUseFailure') {
@@ -528,16 +613,21 @@ function startServer() {
         // message text varies ("Do you want to proceed?" etc.) so we key off
         // notification_type, which is reliably "permission_prompt".
         if (eventName === 'Notification' && payload.notification_type === 'permission_prompt') {
-          claimAlert(payload.session_id, payload.cwd);
+          claimAlert(payload.session_id, payload.cwd, payload._petSource);
           permissionPromptStartTime = Date.now();
           permissionPromptSessionId = payload.session_id;
           permissionPromptCwd = payload.cwd;
+          permissionPromptSource = payload._petSource;
           if (impatientTimeoutId) clearTimeout(impatientTimeoutId);
           impatientTimeoutId = setTimeout(() => {
             if (permissionPromptStartTime !== null) {
               // Still waiting - trigger impatient animation
               logEvent({ source: 'heuristic', event: 'ImpatientTimeout' });
-              sendToPet({ hook_event_name: 'ImpatientTimeout', cwd: permissionPromptCwd }, permissionPromptSessionId);
+              sendToPet({
+                hook_event_name: 'ImpatientTimeout',
+                cwd: permissionPromptCwd,
+                _petSource: permissionPromptSource,
+              }, permissionPromptSessionId);
             }
             impatientTimeoutId = null;
           }, IMPATIENT_THRESHOLD_MS);
@@ -553,6 +643,7 @@ function startServer() {
               permissionPromptStartTime = null;
               permissionPromptSessionId = null;
               permissionPromptCwd = null;
+              permissionPromptSource = null;
               if (impatientTimeoutId) clearTimeout(impatientTimeoutId);
               impatientTimeoutId = null;
               releaseAlert(giveUpSessionId);
@@ -571,6 +662,7 @@ function startServer() {
           permissionPromptStartTime = null;
           permissionPromptSessionId = null;
           permissionPromptCwd = null;
+          permissionPromptSource = null;
           if (impatientTimeoutId) clearTimeout(impatientTimeoutId);
           impatientTimeoutId = null;
           if (alertGiveUpTimeoutId) clearTimeout(alertGiveUpTimeoutId);
@@ -585,15 +677,17 @@ function startServer() {
           bashPendingStartTime = Date.now();
           bashPendingSessionId = payload.session_id;
           bashPendingCwd = payload.cwd;
+          bashPendingSource = payload._petSource;
           if (bashPendingTimeoutId) clearTimeout(bashPendingTimeoutId);
           bashPendingTimeoutId = setTimeout(() => {
             if (bashPendingStartTime !== null) {
               logEvent({ source: 'heuristic', event: 'BashPendingTimeout' });
-              claimAlert(bashPendingSessionId, bashPendingCwd);
+              claimAlert(bashPendingSessionId, bashPendingCwd, bashPendingSource);
               sendToPet({
                 hook_event_name: 'Notification',
                 notification_type: 'permission_prompt',
                 cwd: bashPendingCwd,
+                _petSource: bashPendingSource,
               }, bashPendingSessionId);
             }
             bashPendingTimeoutId = null;
@@ -606,6 +700,7 @@ function startServer() {
           bashPendingStartTime = null;
           bashPendingSessionId = null;
           bashPendingCwd = null;
+          bashPendingSource = null;
           if (bashPendingTimeoutId) clearTimeout(bashPendingTimeoutId);
           bashPendingTimeoutId = null;
         }
@@ -649,6 +744,8 @@ if (!app.requestSingleInstanceLock()) {
       app.dock.hide();
     }
     configureClaudeHooks();
+    seedCodexForwardScript();
+    configureCodexHooks();
     seedSkinDirIfNeeded();
     createWindow();
     setupInteraction();

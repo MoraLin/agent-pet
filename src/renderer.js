@@ -62,6 +62,13 @@ function resolveGif(keyword, required = true) {
 // idle/greet/reading fall through to the same standing pose - skin-idle
 // is a looping GIF, so it plays continuously even though only one src is set.
 const STAND_SRC = resolveGif('idle');
+// Which CLI a hook payload came from, badged on the corner label instead of a
+// generic "❗" so Claude Code and Codex alerts are visually distinguishable.
+const CLAUDE_ICON_SRC = 'src/assets/icons/claude.png';
+const CODEX_ICON_SRC = 'src/assets/icons/codex.png';
+function iconForSource(source) {
+  return source === 'codex' ? CODEX_ICON_SRC : CLAUDE_ICON_SRC;
+}
 const READING_SRC = resolveGif('review');
 const WAVE_SRC = resolveGif('waving');
 const SAD_SRC = resolveGif('failed');
@@ -163,14 +170,23 @@ function setAnim(cls) {
   emoteEl.style.left = EMOTE_LEFT_DEFAULT;
 }
 
-function setEmote(text, floaty) {
-  emoteEl.textContent = text || '';
-  emoteEl.classList.toggle('show', !!text);
+function setEmote(text, floaty, iconSrc) {
+  emoteEl.innerHTML = '';
+  if (iconSrc) {
+    const icon = document.createElement('img');
+    icon.className = 'emote-icon';
+    icon.src = iconSrc;
+    emoteEl.appendChild(icon);
+  }
+  if (text) {
+    emoteEl.appendChild(document.createTextNode(text));
+  }
+  emoteEl.classList.toggle('show', !!text || !!iconSrc);
   emoteEl.classList.toggle('emote-float', !!floaty);
   // Plain emoji never contain letters/digits - this is a cwd project-name
-  // label tacked on (e.g. "❗claude-pet"), which needs different styling
+  // label (and/or a source icon) tacked on, which needs different styling
   // (smaller, no wrap, a background pill) to stay readable.
-  emoteEl.classList.toggle('emote-label', /[a-zA-Z0-9]/.test(text || ''));
+  emoteEl.classList.toggle('emote-label', !!iconSrc || /[a-zA-Z0-9]/.test(text || ''));
 }
 
 // The old run artwork was drawn facing left by default, opposite of every
@@ -302,13 +318,13 @@ function setWanderEnabled(enabled) {
   }
 }
 
-function enterOverride(animClass, emoji, duration, moveToCorner, onEnd, keepBoredom) {
+function enterOverride(animClass, emoji, duration, moveToCorner, onEnd, keepBoredom, iconSrc) {
   mode = 'override';
   clearAutoSubTimer();
   if (overrideTimeoutId) clearTimeout(overrideTimeoutId);
   if (!keepBoredom) resetBoredom();
   setAnim(animClass);
-  setEmote(emoji, !!moveToCorner);
+  setEmote(emoji, !!moveToCorner, iconSrc);
   overrideMoving = !!moveToCorner;
   if (moveToCorner) {
     targetX = viewW - WRAP_SIZE - CORNER_MARGIN;
@@ -423,18 +439,25 @@ function mapHookEvent(payload) {
       // the next hook event supersedes this, rather than reverting to the
       // working pose after a fixed few seconds while still awaiting input.
       if (payload.notification_type === 'permission_prompt') {
+        const icon = iconForSource(payload._petSource);
         const label = cwdLabel(payload.cwd);
-        return { anim: 'anim-wave', emoji: label ? `❗${label}` : '❗', duration: null, corner: true };
+        // No icon yet for this source (e.g. Codex - see iconForSource) - fall
+        // back to the old plain "❗" marker so the alert is never invisible.
+        return { anim: 'anim-wave', emoji: icon ? label : (label || '❗'), icon, duration: null, corner: true };
       }
       return null;
     case 'PreCompact':
       return { anim: 'anim-working', emoji: '🗜️', duration: null, corner: true };
     case 'PostCompact':
       return { anim: 'anim-working', emoji: '✨', duration: 1200, corner: true };
-    case 'ImpatientTimeout': {
-      const label = cwdLabel(payload.cwd);
-      return { anim: 'anim-impatient', emoji: label, duration: null, corner: true };
-    }
+    case 'ImpatientTimeout':
+      return {
+        anim: 'anim-impatient',
+        emoji: cwdLabel(payload.cwd),
+        icon: iconForSource(payload._petSource),
+        duration: null,
+        corner: true,
+      };
     default:
       return null;
   }
@@ -446,14 +469,21 @@ function mapHookEvent(payload) {
 // immediately: it waits a grace period, cancelled if more work shows up.
 let stopGraceTimeoutId = null;
 const STOP_GRACE_MS = 5000;
+// Codex has no Stop event, so its implicit turn-end (below) has to guess
+// "done" from silence after a PostToolUse instead. Codex routinely spends
+// well over 5s "thinking" (composing its next tool call or final reply)
+// with no hook events at all in between - STOP_GRACE_MS alone made the pet
+// go idle mid-task during those gaps. Give the Codex guess a much longer
+// grace period than real Stop's AskUserQuestion-pause grace.
+const CODEX_IMPLICIT_STOP_GRACE_MS = 30000;
 
-function scheduleTurnEnd() {
+function scheduleTurnEnd(graceMs = STOP_GRACE_MS) {
   if (stopGraceTimeoutId) clearTimeout(stopGraceTimeoutId);
   stopGraceTimeoutId = setTimeout(() => {
     stopGraceTimeoutId = null;
     turnActive = false;
     enterAuto();
-  }, STOP_GRACE_MS);
+  }, graceMs);
 }
 
 if (window.petAPI) {
@@ -471,6 +501,17 @@ if (window.petAPI) {
       }
     } else if (name === 'Stop') {
       scheduleTurnEnd();
+    } else if (payload && payload._petSource === 'codex' &&
+               (name === 'PostToolUse' || name === 'PostCompact')) {
+      // Codex has no Stop event at all - confirmed by capturing a real
+      // session's hook payloads, a turn that ends in a plain-text reply with
+      // no further tool calls fires nothing after this PostToolUse. Without
+      // this, turnActive never clears and the pet is stuck in the working
+      // pose forever. Treat "nothing else arrives within the grace window"
+      // as an implicit turn end - a genuine follow-up tool call (PreToolUse)
+      // still cancels this via the branch above, same as it would for a
+      // real Stop.
+      scheduleTurnEnd(CODEX_IMPLICIT_STOP_GRACE_MS);
     }
     // Any hook event not explicitly mapped above still means work is
     // happening mid-turn, so default to the working pose rather than
@@ -479,7 +520,7 @@ if (window.petAPI) {
       (turnActive ? { anim: 'anim-working', emoji: '⌨️', duration: null, corner: true } : null);
     if (mapped) {
       const onEnd = turnActive ? enterCornerWorking : undefined;
-      enterOverride(mapped.anim, mapped.emoji, mapped.duration, mapped.corner, onEnd);
+      enterOverride(mapped.anim, mapped.emoji, mapped.duration, mapped.corner, onEnd, undefined, mapped.icon);
     }
   });
 }
