@@ -475,19 +475,60 @@ const STOP_GRACE_MS = 5000;
 // with no hook events at all in between - STOP_GRACE_MS alone made the pet
 // go idle mid-task during those gaps. Give the Codex guess a much longer
 // grace period than real Stop's AskUserQuestion-pause grace.
-const CODEX_IMPLICIT_STOP_GRACE_MS = 30000;
+// Bumped 30s -> 60s (2026-08-26): 30s was still firing mid-task on real
+// sessions doing larger edits - Codex's silent "thinking" gaps between tool
+// calls can comfortably exceed 30s, so the guess needs to stay wrong less
+// often even if that means a truly-finished turn takes up to 60s to show
+// idle. If this still isn't enough, the reason/graceMs logged below should
+// show how much higher it needs to go.
+const CODEX_IMPLICIT_STOP_GRACE_MS = 60000;
 
-function scheduleTurnEnd(graceMs = STOP_GRACE_MS) {
+function scheduleTurnEnd(graceMs = STOP_GRACE_MS, reason = null) {
   if (stopGraceTimeoutId) clearTimeout(stopGraceTimeoutId);
   stopGraceTimeoutId = setTimeout(() => {
     stopGraceTimeoutId = null;
     turnActive = false;
+    // Only the guessed (non-Stop) path is worth logging - a real Stop firing
+    // this is expected behavior, not something to diagnose later.
+    if (reason && window.petAPI && window.petAPI.logError) {
+      window.petAPI.logError({ event: 'implicit_turn_end', reason, graceMs });
+    }
     enterAuto();
   }, graceMs);
 }
 
+// Neither Claude Code nor Codex fires any hook event when the user presses
+// Esc to interrupt a turn - the CLI just stops, and nothing tells us it
+// happened. Most mid-turn poses (PreToolUse/PostToolUse-driven) have
+// duration: null, so without this an Esc-interrupt leaves the pet stuck
+// working forever - the existing Stop/implicit-turn-end grace timers above
+// never fire because they're only scheduled by the specific events they
+// already handle, not by "nothing else ever arrives again".
+// Deadman's-switch, independent of that logic: reset on every hook event,
+// fire only if the turn is still marked active once it lapses with no new
+// event at all. Set above every other timeout here (CODEX_IMPLICIT_STOP_GRACE_MS,
+// BASH_PENDING_THRESHOLD_MS in main.js) so it only catches what those don't,
+// never preempts them.
+let escWatchdogTimeoutId = null;
+const ESC_INTERRUPT_WATCHDOG_MS = 60000;
+
+function resetEscInterruptWatchdog() {
+  if (escWatchdogTimeoutId) clearTimeout(escWatchdogTimeoutId);
+  escWatchdogTimeoutId = setTimeout(() => {
+    escWatchdogTimeoutId = null;
+    if (turnActive) {
+      turnActive = false;
+      if (window.petAPI && window.petAPI.logError) {
+        window.petAPI.logError({ event: 'esc_watchdog_fired' });
+      }
+      enterAuto();
+    }
+  }, ESC_INTERRUPT_WATCHDOG_MS);
+}
+
 if (window.petAPI) {
   window.petAPI.onEvent((payload) => {
+    resetEscInterruptWatchdog();
     const name = payload && payload.hook_event_name;
     // Notification fires for idle-wait reminders too, not just permission
     // prompts - only a permission prompt should count as "turn still active"
@@ -511,7 +552,7 @@ if (window.petAPI) {
       // as an implicit turn end - a genuine follow-up tool call (PreToolUse)
       // still cancels this via the branch above, same as it would for a
       // real Stop.
-      scheduleTurnEnd(CODEX_IMPLICIT_STOP_GRACE_MS);
+      scheduleTurnEnd(CODEX_IMPLICIT_STOP_GRACE_MS, 'codex_silence');
     }
     // Any hook event not explicitly mapped above still means work is
     // happening mid-turn, so default to the working pose rather than
