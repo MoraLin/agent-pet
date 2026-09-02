@@ -97,11 +97,18 @@ let wanderEnabled = true;
 // falling asleep. Mirrors src/renderer.js's own default until changed - see
 // setBoredomMs().
 let boredomMs = 90000;
-let permissionPromptStartTime = null;
-let permissionPromptSessionId = null;
-let permissionPromptCwd = null;
-let permissionPromptSource = null;
-let impatientTimeoutId = null;
+// Keyed by session_id (not a single shared slot) - hooks are global and
+// multiple sessions can have permission prompts in flight at once. A single
+// shared slot meant a second session's prompt silently clobbered the first
+// session's timers: its impatient/give-up timeouts got cancelled and
+// replaced by the new session's, so the first session's entry in
+// alertingSessions never got cleaned up and sat there forever, blocking
+// canDisplay() for every other session's events too (confirmed live: a pet
+// process with one such orphaned entry stopped reacting to ANY new
+// UserPromptSubmit/PreToolUse from a completely different, healthy session
+// until the app was restarted).
+// session_id -> { cwd, source, impatientTimeoutId, giveUpTimeoutId }
+const pendingPermissionPrompts = new Map();
 const IMPATIENT_THRESHOLD_MS = 15000; // 15 seconds
 
 // There's no "user answered the permission prompt" hook event either - the
@@ -111,8 +118,7 @@ const IMPATIENT_THRESHOLD_MS = 15000; // 15 seconds
 // the human already answered and it's simply still executing. After this
 // long with no resolution, assume it's been answered and downgrade to a
 // working pose instead of continuing to look like it's still waiting on you.
-let alertGiveUpTimeoutId = null;
-const ALERT_GIVE_UP_MS = 30000; // 30 seconds
+const ALERT_GIVE_UP_MS = 60000; // 60 seconds
 
 // Hooks can't tell us a Bash command is blocked on its own interactive
 // prompt (e.g. a CLI's own "Do you want to proceed?") - there's no such
@@ -123,11 +129,9 @@ const ALERT_GIVE_UP_MS = 30000; // 30 seconds
 // own `tsc -b --noEmit` routinely running past 15s and re-triggering this on
 // every single invocation, so this is set well above typical build/test
 // command durations rather than matching the permission-prompt threshold.
-let bashPendingStartTime = null;
-let bashPendingSessionId = null;
-let bashPendingCwd = null;
-let bashPendingSource = null;
-let bashPendingTimeoutId = null;
+// Keyed by session_id for the same reason as pendingPermissionPrompts above.
+// session_id -> { cwd, source, timeoutId }
+const pendingBashCalls = new Map();
 const BASH_PENDING_THRESHOLD_MS = 45000; // 45 seconds
 
 // Hooks are global - every Claude Code session on the machine posts to the
@@ -141,7 +145,7 @@ const BASH_PENDING_THRESHOLD_MS = 45000; // 45 seconds
 // If more than one session is alerting at once, we cycle the display between
 // them every ALERT_ROTATION_MS instead of only ever showing the first one -
 // otherwise a second session waiting for help would be silently invisible.
-const alertingSessions = new Map(); // session_id -> { cwd, source }
+const alertingSessions = new Map(); // session_id -> { cwd, source, state: 'waving' | 'impatient' }
 let displayedAlertSessionId = null;
 let alertRotationTimeoutId = null;
 const ALERT_ROTATION_MS = 4000;
@@ -151,8 +155,19 @@ function canDisplay(sessionId) {
   return alertingSessions.size === 0 || sessionId === displayedAlertSessionId;
 }
 
+// Reflects whichever state the displayed session is actually in - a session
+// that already escalated to impatient (see markImpatient below) must keep
+// showing that on every rotation tick, not get reset back to the initial
+// waving payload just because showDisplayedAlert() ran again.
 function currentAlertPayload() {
   const info = alertingSessions.get(displayedAlertSessionId);
+  if (info && info.state === 'impatient') {
+    return {
+      hook_event_name: 'ImpatientTimeout',
+      cwd: info.cwd,
+      _petSource: info.source,
+    };
+  }
   return {
     hook_event_name: 'Notification',
     notification_type: 'permission_prompt',
@@ -181,12 +196,61 @@ function scheduleAlertRotation() {
 
 function claimAlert(sessionId, cwd, source) {
   const isNewSession = !alertingSessions.has(sessionId);
-  alertingSessions.set(sessionId, { cwd, source });
+  // Preserve an already-escalated 'impatient' state instead of resetting to
+  // 'waving' - a session can get re-claimed while still actively alerting
+  // (e.g. the Bash-pending heuristic re-arming for a session whose real
+  // permission_prompt already escalated), and that must not visibly regress
+  // the pet back to the calmer pose mid-wait.
+  const existing = alertingSessions.get(sessionId);
+  alertingSessions.set(sessionId, { cwd, source, state: existing ? existing.state : 'waving' });
   if (!displayedAlertSessionId) {
     displayedAlertSessionId = sessionId;
     showDisplayedAlert();
   }
   if (isNewSession) scheduleAlertRotation();
+}
+
+// Called when a session's own impatient timer (see IMPATIENT_THRESHOLD_MS
+// below) fires. Updates that session's stored state so it keeps showing
+// impatient on every future rotation tick, and - if it's the one on screen
+// right now - repaints immediately instead of waiting for the next tick.
+function markImpatient(sessionId) {
+  const info = alertingSessions.get(sessionId);
+  if (!info) return;
+  info.state = 'impatient';
+  if (sessionId === displayedAlertSessionId) showDisplayedAlert();
+}
+
+// Shared by both a real permission_prompt Notification and the
+// BashPendingTimeout heuristic further down - both represent "the pet
+// should show waiting/impatient until this session gives a sign of life,"
+// and both need the same 15s/30s safety-net timers. Without this, a claim
+// made only via BashPendingTimeout had no give-up timer of its own: if that
+// session's CLI was then killed/interrupted (so it never sends a real
+// resolution event), the claim sat in alertingSessions forever, blocking
+// canDisplay() for every other session indefinitely.
+function startPermissionPromptTimers(sessionId, cwd, source) {
+  claimAlert(sessionId, cwd, source);
+
+  const prior = pendingPermissionPrompts.get(sessionId);
+  if (prior) {
+    clearTimeout(prior.impatientTimeoutId);
+    clearTimeout(prior.giveUpTimeoutId);
+  }
+
+  const entry = { cwd, source };
+  entry.impatientTimeoutId = setTimeout(() => {
+    // Still waiting - trigger impatient animation
+    logEvent({ source: 'heuristic', event: 'ImpatientTimeout' });
+    markImpatient(sessionId);
+  }, IMPATIENT_THRESHOLD_MS);
+  entry.giveUpTimeoutId = setTimeout(() => {
+    logEvent({ source: 'heuristic', event: 'AlertGiveUp', session_id: sessionId, cwd });
+    pendingPermissionPrompts.delete(sessionId);
+    releaseAlert(sessionId);
+    sendToPet({ hook_event_name: 'PreToolUse', tool_name: 'Bash', cwd }, sessionId);
+  }, ALERT_GIVE_UP_MS);
+  pendingPermissionPrompts.set(sessionId, entry);
 }
 
 function releaseAlert(sessionId) {
@@ -613,44 +677,7 @@ function startServer() {
         // message text varies ("Do you want to proceed?" etc.) so we key off
         // notification_type, which is reliably "permission_prompt".
         if (eventName === 'Notification' && payload.notification_type === 'permission_prompt') {
-          claimAlert(payload.session_id, payload.cwd, payload._petSource);
-          permissionPromptStartTime = Date.now();
-          permissionPromptSessionId = payload.session_id;
-          permissionPromptCwd = payload.cwd;
-          permissionPromptSource = payload._petSource;
-          if (impatientTimeoutId) clearTimeout(impatientTimeoutId);
-          impatientTimeoutId = setTimeout(() => {
-            if (permissionPromptStartTime !== null) {
-              // Still waiting - trigger impatient animation
-              logEvent({ source: 'heuristic', event: 'ImpatientTimeout' });
-              sendToPet({
-                hook_event_name: 'ImpatientTimeout',
-                cwd: permissionPromptCwd,
-                _petSource: permissionPromptSource,
-              }, permissionPromptSessionId);
-            }
-            impatientTimeoutId = null;
-          }, IMPATIENT_THRESHOLD_MS);
-
-          if (alertGiveUpTimeoutId) clearTimeout(alertGiveUpTimeoutId);
-          const giveUpSessionId = payload.session_id;
-          const giveUpCwd = payload.cwd;
-          alertGiveUpTimeoutId = setTimeout(() => {
-            // Guard against a newer prompt (possibly a different session)
-            // having since overwritten these - only act if still the same one.
-            if (permissionPromptStartTime !== null && permissionPromptSessionId === giveUpSessionId) {
-              logEvent({ source: 'heuristic', event: 'AlertGiveUp', session_id: giveUpSessionId, cwd: giveUpCwd });
-              permissionPromptStartTime = null;
-              permissionPromptSessionId = null;
-              permissionPromptCwd = null;
-              permissionPromptSource = null;
-              if (impatientTimeoutId) clearTimeout(impatientTimeoutId);
-              impatientTimeoutId = null;
-              releaseAlert(giveUpSessionId);
-              sendToPet({ hook_event_name: 'PreToolUse', tool_name: 'Bash', cwd: giveUpCwd }, giveUpSessionId);
-            }
-            alertGiveUpTimeoutId = null;
-          }, ALERT_GIVE_UP_MS);
+          startPermissionPromptTimers(payload.session_id, payload.cwd, payload._petSource);
         }
 
         // Clear timing when permission is resolved. The prompt being answered
@@ -659,14 +686,12 @@ function startServer() {
         // happen well before Stop if more steps follow in the same turn.
         if (eventName === 'Stop' || eventName === 'UserPromptSubmit' ||
             eventName === 'PostToolUse' || eventName === 'PostToolUseFailure') {
-          permissionPromptStartTime = null;
-          permissionPromptSessionId = null;
-          permissionPromptCwd = null;
-          permissionPromptSource = null;
-          if (impatientTimeoutId) clearTimeout(impatientTimeoutId);
-          impatientTimeoutId = null;
-          if (alertGiveUpTimeoutId) clearTimeout(alertGiveUpTimeoutId);
-          alertGiveUpTimeoutId = null;
+          const pending = pendingPermissionPrompts.get(payload.session_id);
+          if (pending) {
+            clearTimeout(pending.impatientTimeoutId);
+            clearTimeout(pending.giveUpTimeoutId);
+            pendingPermissionPrompts.delete(payload.session_id);
+          }
         }
         if (RESOLUTION_EVENTS.has(eventName)) {
           releaseAlert(payload.session_id);
@@ -674,35 +699,34 @@ function startServer() {
 
         // Track Bash calls for the "possibly stuck on its own prompt" alert.
         if (eventName === 'PreToolUse' && payload.tool_name === 'Bash') {
-          bashPendingStartTime = Date.now();
-          bashPendingSessionId = payload.session_id;
-          bashPendingCwd = payload.cwd;
-          bashPendingSource = payload._petSource;
-          if (bashPendingTimeoutId) clearTimeout(bashPendingTimeoutId);
-          bashPendingTimeoutId = setTimeout(() => {
-            if (bashPendingStartTime !== null) {
-              logEvent({ source: 'heuristic', event: 'BashPendingTimeout' });
-              claimAlert(bashPendingSessionId, bashPendingCwd, bashPendingSource);
-              sendToPet({
-                hook_event_name: 'Notification',
-                notification_type: 'permission_prompt',
-                cwd: bashPendingCwd,
-                _petSource: bashPendingSource,
-              }, bashPendingSessionId);
-            }
-            bashPendingTimeoutId = null;
+          const sessionId = payload.session_id;
+          const cwd = payload.cwd;
+          const source = payload._petSource;
+          const prior = pendingBashCalls.get(sessionId);
+          if (prior) clearTimeout(prior.timeoutId);
+
+          const entry = { cwd, source };
+          entry.timeoutId = setTimeout(() => {
+            logEvent({ source: 'heuristic', event: 'BashPendingTimeout' });
+            // startPermissionPromptTimers() -> claimAlert() already pushes
+            // this to the renderer via showDisplayedAlert() when it becomes
+            // the shown session (or it'll pick it up on the next rotation
+            // tick otherwise) - an extra sendToPet() here would just repeat
+            // the identical payload.
+            startPermissionPromptTimers(sessionId, cwd, source);
+            pendingBashCalls.delete(sessionId);
           }, BASH_PENDING_THRESHOLD_MS);
+          pendingBashCalls.set(sessionId, entry);
         }
 
         // Clear once the Bash call actually finishes (normally or with an error).
         if (eventName === 'PostToolUse' || eventName === 'PostToolUseFailure' ||
             eventName === 'Stop' || eventName === 'UserPromptSubmit') {
-          bashPendingStartTime = null;
-          bashPendingSessionId = null;
-          bashPendingCwd = null;
-          bashPendingSource = null;
-          if (bashPendingTimeoutId) clearTimeout(bashPendingTimeoutId);
-          bashPendingTimeoutId = null;
+          const pending = pendingBashCalls.get(payload.session_id);
+          if (pending) {
+            clearTimeout(pending.timeoutId);
+            pendingBashCalls.delete(payload.session_id);
+          }
         }
 
         sendToPet(payload, payload.session_id);

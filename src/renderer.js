@@ -510,7 +510,7 @@ function scheduleTurnEnd(graceMs = STOP_GRACE_MS, reason = null) {
 // BASH_PENDING_THRESHOLD_MS in main.js) so it only catches what those don't,
 // never preempts them.
 let escWatchdogTimeoutId = null;
-const ESC_INTERRUPT_WATCHDOG_MS = 60000;
+const ESC_INTERRUPT_WATCHDOG_MS = 180000; // 3 minutes
 
 function resetEscInterruptWatchdog() {
   if (escWatchdogTimeoutId) clearTimeout(escWatchdogTimeoutId);
