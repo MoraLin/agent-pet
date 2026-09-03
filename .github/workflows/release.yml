@@ -1,0 +1,125 @@
+name: Release
+
+# Only real version tags (e.g. v1.2.0) trigger a publish to the Downloads
+# repo. workflow_dispatch exists purely so a human can run the build/lint
+# jobs manually to sanity-check a branch - it never runs the release job.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch: {}
+
+env:
+  DOWNLOADS_REPO: MoraLin/AgentPet-Downloads
+
+jobs:
+  verify-version:
+    name: Verify tag matches package.json version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compare tag to package.json version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match package.json version (${PKG_VERSION})"
+            exit 1
+          fi
+          echo "Verified: tag ${GITHUB_REF_NAME} matches package.json version ${PKG_VERSION}"
+
+  lint-and-test:
+    name: Lint & test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run lint
+      - run: pnpm run test
+
+  build-macos:
+    name: Build macOS (arm64 + x64)
+    needs: [verify-version, lint-and-test]
+    runs-on: macos-latest
+    env:
+      # No signing identity exists on the CI runner - without this,
+      # electron-builder tries to auto-discover one and fails the build.
+      CSC_IDENTITY_AUTO_DISCOVERY: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run dist
+      - run: pnpm run dist:x64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-binaries
+          path: |
+            dist/Agent-Pet-arm64.dmg
+            dist/Agent-Pet-x64.dmg
+          if-no-files-found: error
+
+  build-windows:
+    name: Build Windows
+    needs: [verify-version, lint-and-test]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run dist:win
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-binary
+          path: dist/Agent-Pet-win.exe
+          if-no-files-found: error
+
+  release:
+    name: Publish release to AgentPet-Downloads
+    needs: [verify-version, lint-and-test, build-macos, build-windows]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.DOWNLOADS_REPO_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: macos-binaries
+          path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-binary
+          path: dist
+
+      - name: Fail if a release for this tag already exists
+        run: |
+          if gh release view "${GITHUB_REF_NAME}" --repo "${DOWNLOADS_REPO}" >/dev/null 2>&1; then
+            echo "::error::Release ${GITHUB_REF_NAME} already exists on ${DOWNLOADS_REPO} - refusing to overwrite. Delete it manually first if this is intentional."
+            exit 1
+          fi
+
+      - name: Create GitHub Release on Downloads repo
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --repo "${DOWNLOADS_REPO}" \
+            --title "Agent Pet ${GITHUB_REF_NAME}" \
+            --notes-file RELEASE_NOTES.md \
+            dist/Agent-Pet-arm64.dmg \
+            dist/Agent-Pet-x64.dmg \
+            dist/Agent-Pet-win.exe

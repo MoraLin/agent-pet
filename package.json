@@ -3,11 +3,14 @@
   "version": "1.1.0",
   "description": "Desktop pet that reacts to Claude Code hook events - skin it with any GIF pack (e.g. from codex-pets.net)",
   "main": "main.js",
+  "packageManager": "pnpm@11.13.0",
   "scripts": {
     "start": "electron .",
     "dist": "electron-builder --mac dmg --arm64",
     "dist:x64": "electron-builder --mac dmg --x64",
-    "dist:win": "electron-builder --win portable --x64"
+    "dist:win": "electron-builder --win portable --x64",
+    "lint": "node scripts/check-syntax.js",
+    "test": "node scripts/check-syntax.js"
   },
   "license": "MIT",
   "devDependencies": {
@@ -40,7 +43,7 @@
     "win": {
       "icon": "build/icon.png",
       "target": "portable",
-      "artifactName": "Agent-Pet-Win.${ext}"
+      "artifactName": "Agent-Pet-win.${ext}"
     }
   }
 }
