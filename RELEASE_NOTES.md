@@ -11,6 +11,7 @@
 - The hook HTTP server now shows an error dialog and exits if it fails to bind its port, instead of running silently with no way to receive events.
 - The hook HTTP server now rejects oversized request bodies (64KB cap) instead of buffering an unbounded payload in memory.
 - Fixed an idle-animation timer bug and tuned the "waiting for help" / ESC-idle thresholds so the pet no longer goes idle while still waiting on the user.
+- The pet no longer shows "needs help" for long-running but perfectly normal commands like packaging builds (`electron-builder`, `pnpm run dist*`).
 
 ### New features
 - Added a desktop update-available notification badge that checks once a day and links to the latest release.
@@ -34,6 +35,7 @@
 - Hook 事件接收伺服器若無法啟動（例如 port 被占用），現在會跳出錯誤視窗並結束程式，不會再無聲無息地「看起來活著、實際上收不到事件」。
 - Hook 事件接收伺服器現在會拒絕過大的請求內容（上限 64KB），避免無限制的資料量占用記憶體。
 - 修復閒置動畫計時器問題，並調整「等待協助」與 ESC 閒置的時間門檻，避免寵物在仍在等待使用者時就跑去閒置。
+- 寵物不會再對正常的長時間指令（如打包用的 `electron-builder`、`pnpm run dist*`）誤判成「需要協助」。
 
 ### 新功能
 - 新增桌面更新提醒角標，每天檢查一次是否有新版本，並可連結到最新版下載頁。
