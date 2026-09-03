@@ -10,9 +10,9 @@
   "scripts": {
     "start": "electron .",
     "build:prod": "node scripts/build-prod.js",
-    "dist": "node scripts/build-prod.js && electron-builder --mac dmg --arm64",
-    "dist:x64": "node scripts/build-prod.js && electron-builder --mac dmg --x64",
-    "dist:win": "node scripts/build-prod.js && electron-builder --win portable --x64",
+    "dist": "node scripts/build-prod.js && electron-builder --mac dmg --arm64 --publish never",
+    "dist:x64": "node scripts/build-prod.js && electron-builder --mac dmg --x64 --publish never",
+    "dist:win": "node scripts/build-prod.js && electron-builder --win portable --x64 --publish never",
     "lint": "node scripts/check-syntax.js",
     "test": "node scripts/check-syntax.js"
   },
