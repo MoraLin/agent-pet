@@ -46,6 +46,23 @@ const ALERT_GIVE_UP_MS = 60000; // 60 seconds
 const pendingBashCalls = new Map();
 const BASH_PENDING_THRESHOLD_MS = 45000; // 45 seconds
 
+// Some commands are known to legitimately run past BASH_PENDING_THRESHOLD_MS
+// on their own (multi-minute packaging builds) - alerting on these is a
+// guaranteed false positive every time, not an occasional one, so they're
+// exempted from Bash-pending tracking entirely rather than just given a
+// longer threshold. Everything else is unaffected.
+const KNOWN_SLOW_BASH_PATTERNS = [
+  /\belectron-builder\b/,
+  /\b(?:pnpm|npm)\s+run\s+dist\b/,
+];
+
+function isKnownSlowBashCommand(command) {
+  return (
+    typeof command === "string" &&
+    KNOWN_SLOW_BASH_PATTERNS.some((pattern) => pattern.test(command))
+  );
+}
+
 // Hooks are global - every Claude Code session on the machine posts to the
 // same pet. Without this, session B's routine PreToolUse/PostToolUse would
 // silently overwrite session A's still-unresolved "needs help" alert on
@@ -195,9 +212,14 @@ function startPermissionPromptTimers(sessionId, cwd, source) {
 
 // Track a Bash call for the "possibly stuck on its own prompt" alert -
 // called for PreToolUse+Bash with a valid session_id.
-function trackBashCall(sessionId, cwd, source) {
+function trackBashCall(sessionId, cwd, source, command) {
   const prior = pendingBashCalls.get(sessionId);
   if (prior) clearTimeout(prior.timeoutId);
+
+  if (isKnownSlowBashCommand(command)) {
+    pendingBashCalls.delete(sessionId);
+    return;
+  }
 
   const entry = { cwd, source };
   entry.timeoutId = setTimeout(() => {

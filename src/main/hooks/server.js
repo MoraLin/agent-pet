@@ -128,7 +128,11 @@ function startServer(port, win) {
 
         // Track Bash calls for the "possibly stuck on its own prompt" alert.
         if (eventName === "PreToolUse" && payload.tool_name === "Bash" && sessionId) {
-          sessionState.trackBashCall(sessionId, payload.cwd, payload._petSource);
+          const command =
+            payload.tool_input && typeof payload.tool_input.command === "string"
+              ? payload.tool_input.command
+              : undefined;
+          sessionState.trackBashCall(sessionId, payload.cwd, payload._petSource, command);
         }
 
         // Clear once the Bash call actually finishes (normally or with an error).
