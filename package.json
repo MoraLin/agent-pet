@@ -9,16 +9,18 @@
   },
   "scripts": {
     "start": "electron .",
-    "dist": "electron-builder --mac dmg --arm64",
-    "dist:x64": "electron-builder --mac dmg --x64",
-    "dist:win": "electron-builder --win portable --x64",
+    "build:prod": "node scripts/build-prod.js",
+    "dist": "node scripts/build-prod.js && electron-builder --mac dmg --arm64",
+    "dist:x64": "node scripts/build-prod.js && electron-builder --mac dmg --x64",
+    "dist:win": "node scripts/build-prod.js && electron-builder --win portable --x64",
     "lint": "node scripts/check-syntax.js",
     "test": "node scripts/check-syntax.js"
   },
   "license": "MIT",
   "devDependencies": {
     "electron": "^32.0.0",
-    "electron-builder": "^26.15.3"
+    "electron-builder": "^26.15.3",
+    "esbuild": "^0.28.2"
   },
   "build": {
     "appId": "com.agentpet.app",
@@ -26,7 +28,6 @@
     "files": [
       "main.js",
       "preload.js",
-      "skin-keywords.js",
       "codex-hook-forward.js",
       "index.html",
       "style.css",
@@ -35,7 +36,8 @@
     ],
     "directories": {
       "output": "dist",
-      "buildResources": "build"
+      "buildResources": "build",
+      "app": "build-prod"
     },
     "mac": {
       "icon": "build/icon.icns",

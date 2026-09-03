@@ -10,7 +10,7 @@ const path = require("path");
 const { execFileSync } = require("child_process");
 
 const ROOT = path.join(__dirname, "..");
-const SKIP_DIRS = new Set(["node_modules", "dist", ".git", "build"]);
+const SKIP_DIRS = new Set(["node_modules", "dist", ".git", "build", "build-prod"]);
 
 function collectJsFiles(dir, out) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {

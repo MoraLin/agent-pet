@@ -6,6 +6,7 @@ package-lock.json
 # Build output
 dist/
 build/
+build-prod/
 out/
 
 # Logs
