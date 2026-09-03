@@ -1,6 +1,6 @@
 {
   "name": "agent-pet",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Desktop pet that reacts to Claude Code hook events - skin it with any GIF pack (e.g. from codex-pets.net)",
   "main": "main.js",
   "packageManager": "pnpm@11.13.0",
