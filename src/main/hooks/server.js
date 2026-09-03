@@ -10,6 +10,13 @@ const RESOLUTION_EVENTS = new Set([
   "UserPromptSubmit",
 ]);
 
+// Real hook payloads are a handful of short string fields (cwd, tool name,
+// session id) - nothing legitimate should ever approach this. There's no
+// auth on this endpoint (any local process can POST here), so without a cap
+// an unbounded body would grow `body` without limit and exhaust memory
+// (review Finding 6).
+const MAX_BODY_BYTES = 64 * 1024; // 64KB
+
 function startServer(port, win) {
   const server = http.createServer((req, res) => {
     if (req.method !== "POST" || req.url !== "/event") {
@@ -18,10 +25,32 @@ function startServer(port, win) {
     }
 
     let body = "";
+    let bodyBytes = 0;
+    let aborted = false;
+
+    // req.destroy() below can itself emit 'error' on some platforms/Node
+    // versions - an EventEmitter 'error' with no listener crashes the whole
+    // process, so this no-op listener is required, not decorative.
+    req.on("error", () => {});
+
     req.on("data", (chunk) => {
+      if (aborted) return;
+      bodyBytes += chunk.length;
+      if (bodyBytes > MAX_BODY_BYTES) {
+        aborted = true;
+        logEvent({
+          source: "app",
+          event: "hook_payload_too_large",
+          bytes: bodyBytes,
+        });
+        res.writeHead(413).end();
+        req.destroy();
+        return;
+      }
       body += chunk;
     });
     req.on("end", () => {
+      if (aborted) return;
       res.writeHead(200).end();
       try {
         const payload = JSON.parse(body);
