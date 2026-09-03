@@ -17,7 +17,7 @@ frequent and much lower-stakes action.
 3. If validation passes, write a one-line summary of what changed.
 4. `git add` only the files that belong to this task (section 3).
 5. Create the commit (section 4).
-6. If the current branch is not `main`, you may push it (section 7).
+6. Push the commit (section 7).
 7. Report back using the format in section 11.
 
 Never, as part of this flow:
@@ -125,7 +125,8 @@ If the change is internal only — refactor, tests, docs, CI, cleanup — leave
 
 ## 7. Push behavior
 
-If the current branch is **not** `main`:
+After a commit passes validation and diff review, push it — including on
+`main`:
 ```
 git push origin <current-branch>
 ```
@@ -134,10 +135,10 @@ or, if it has no upstream yet:
 git push -u origin <current-branch>
 ```
 
-If the current branch **is** `main`:
-- Do not push automatically.
-- Create the local commit only, and tell the human it's ready for them to
-  review and push. `main` stays on the PR / human-review flow.
+The human reviews pushed commits on GitHub after the fact rather than
+gating each push beforehand. This doesn't relax anything else in this file —
+validation (section 2), diff review (section 3), and the release
+restrictions (section 10) still apply exactly as written before any push.
 
 ## 8. Pre-existing changes that aren't yours
 
