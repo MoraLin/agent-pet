@@ -56,6 +56,7 @@ function writePackageJson() {
     name: rootPkg.name,
     version: rootPkg.version,
     description: rootPkg.description,
+    author: rootPkg.author,
     main: "main.js",
     license: rootPkg.license,
   };
