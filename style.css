@@ -69,6 +69,16 @@ html, body {
   text-shadow: none;
 }
 
+/* success.svg has no accompanying text, so it doesn't need the emote-label
+   pill background above (that's for keeping icon+text readable over an
+   arbitrary desktop background) - without this override it still gets
+   emote-label's dark rounded box, showing as an odd bare square around it. */
+#emote:has(.emote-icon[src$="success.svg"]) {
+  background: none;
+  padding: 0;
+  border-radius: 0;
+}
+
 /* Badges which CLI (Claude Code vs Codex) a hook alert came from - see
    iconForSource() in renderer.js. */
 .emote-icon {
@@ -77,9 +87,75 @@ html, body {
   flex: none;
 }
 
+/* Targeted by its own src rather than resizing/animating .emote-icon itself,
+   so the claude.png/codex.png source badges above are left untouched. */
+.emote-icon[src$="success.svg"] {
+  width: 28px;
+  height: 28px;
+  /* margin, not transform - fa-flip's keyframes already drive transform,
+     so a static transform here would just get overridden during playback. */
+  margin-top: -8px;
+  /* Same as Font Awesome's own "fa-flip" animate-power class
+     (https://docs.fontawesome.com/web/style/animate#flip) - continuous
+     (not one-shot) so it stays clearly visible for the whole ~3s the
+     checkmark is on screen, unlike the brief pop-in this replaced. */
+  animation: fa-flip 2s linear infinite;
+}
+
+@keyframes fa-flip {
+  50% { transform: rotate3d(0, 1, 0, -180deg); }
+}
+
 /* counter the parent's mirror flip so the emote glyph isn't backwards */
 #dino-wrap.mirrored #emote {
   transform: translateX(-50%) scaleX(-1);
+}
+
+/* New-version badge - independent of #emote/setAnim entirely, so it can sit
+   above the pet's head for a while regardless of whatever pose/emote the
+   hook-driven animation system is currently showing underneath it. */
+#update-badge {
+  position: absolute;
+  top: -14px;
+  right: -8px;
+  width: 32px;
+  height: 32px;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+  pointer-events: none;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.4));
+}
+
+#update-badge img {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+#update-badge.show {
+  opacity: 1;
+  animation: shake-update-badge 1s linear infinite;
+}
+
+/* Same keyframe timing as Font Awesome's own "fa-shake" utility class - a
+   plain CSS animation, not something that requires pulling in their whole
+   icon library just for this one motion. */
+@keyframes shake-update-badge {
+  0% { transform: rotate(-15deg); }
+  4% { transform: rotate(15deg); }
+  8%, 24% { transform: rotate(-18deg); }
+  12%, 28% { transform: rotate(18deg); }
+  16% { transform: rotate(-22deg); }
+  20% { transform: rotate(22deg); }
+  32% { transform: rotate(-12deg); }
+  36% { transform: rotate(12deg); }
+  40%, 100% { transform: rotate(0deg); }
+}
+
+/* counter the parent's mirror flip so the badge isn't glued to the wrong side */
+#dino-wrap.mirrored #update-badge {
+  right: auto;
+  left: -8px;
 }
 
 /* sleeping Z drifts up and fades, instead of sitting static */

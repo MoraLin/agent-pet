@@ -1,9 +1,22 @@
-const { app, BrowserWindow, screen, ipcMain, Menu, dialog } = require('electron');
-const http = require('http');
-const path = require('path');
-const fs = require('fs');
-const os = require('os');
-const { REQUIRED: REQUIRED_SKIN_KEYWORDS, matchesKeyword } = require('./skin-keywords');
+const {
+  app,
+  BrowserWindow,
+  screen,
+  ipcMain,
+  Menu,
+  dialog,
+  shell,
+  nativeImage,
+} = require("electron");
+const http = require("http");
+const https = require("https");
+const path = require("path");
+const fs = require("fs");
+const os = require("os");
+const {
+  REQUIRED: REQUIRED_SKIN_KEYWORDS,
+  matchesKeyword,
+} = require("./skin-keywords");
 
 const PORT = 9876;
 
@@ -16,8 +29,8 @@ const PORT = 9876;
 // packaged builds (unlike LOG_PATH below) - there's no dev convenience
 // reason to special-case it, and testing the import feature in dev this way
 // actually exercises the real path.
-const SKIN_DEFAULT_DIR = path.join(__dirname, 'src', 'assets', 'skin');
-const SKIN_LIVE_DIR = path.join(app.getPath('userData'), 'skin');
+const SKIN_DEFAULT_DIR = path.join(__dirname, "src", "assets", "skin");
+const SKIN_LIVE_DIR = path.join(app.getPath("userData"), "skin");
 // preload.js can't call app.getPath() itself (that's main-process-only) -
 // passed through via env var instead, since preload (sandbox: false) gets a
 // real process.env that mirrors this process's.
@@ -28,14 +41,17 @@ process.env.PET_SKIN_DIR = SKIN_LIVE_DIR;
 // copied out to a real path first, same reasoning as SKIN_LIVE_DIR above.
 // Unlike the skin folder, this file is never user-edited, so it's re-copied
 // on every launch to always match the running app version.
-const CODEX_FORWARD_SCRIPT_LIVE = path.join(app.getPath('userData'), 'codex-hook-forward.js');
+const CODEX_FORWARD_SCRIPT_LIVE = path.join(
+  app.getPath("userData"),
+  "codex-hook-forward.js",
+);
 
 // One-time migration from the old folder name ("nimbus", pre-rename) to the
 // new one - runs before seeding so an existing user's already-imported skin
 // gets carried over instead of being mistaken for a fresh install and
 // silently replaced by the bundled default.
 function migrateLegacyNimbusDirIfNeeded() {
-  const legacyDir = path.join(app.getPath('userData'), 'nimbus');
+  const legacyDir = path.join(app.getPath("userData"), "nimbus");
   if (fs.existsSync(legacyDir) && !fs.existsSync(SKIN_LIVE_DIR)) {
     fs.renameSync(legacyDir, SKIN_LIVE_DIR);
   }
@@ -46,11 +62,15 @@ function migrateLegacyNimbusDirIfNeeded() {
 // whatever skin the user last imported.
 function seedSkinDirIfNeeded() {
   migrateLegacyNimbusDirIfNeeded();
-  if (fs.existsSync(SKIN_LIVE_DIR) && fs.readdirSync(SKIN_LIVE_DIR).length > 0) return;
+  if (fs.existsSync(SKIN_LIVE_DIR) && fs.readdirSync(SKIN_LIVE_DIR).length > 0)
+    return;
   fs.mkdirSync(SKIN_LIVE_DIR, { recursive: true });
   for (const file of fs.readdirSync(SKIN_DEFAULT_DIR)) {
-    if (!file.toLowerCase().endsWith('.gif')) continue; // skip .DS_Store etc.
-    fs.copyFileSync(path.join(SKIN_DEFAULT_DIR, file), path.join(SKIN_LIVE_DIR, file));
+    if (!file.toLowerCase().endsWith(".gif")) continue; // skip .DS_Store etc.
+    fs.copyFileSync(
+      path.join(SKIN_DEFAULT_DIR, file),
+      path.join(SKIN_LIVE_DIR, file),
+    );
   }
 }
 
@@ -70,8 +90,8 @@ function seedSkinDirIfNeeded() {
 // until actually testing a packaged build) - use the OS's proper writable
 // per-app data dir instead.
 const LOG_PATH = app.isPackaged
-  ? path.join(app.getPath('userData'), 'logs', 'events.log')
-  : path.join(__dirname, 'logs', 'events.log');
+  ? path.join(app.getPath("userData"), "logs", "events.log")
+  : path.join(__dirname, "logs", "events.log");
 const LOG_MAX_BYTES = 2 * 1024 * 1024; // 2MB
 
 function logEvent(entry) {
@@ -80,7 +100,10 @@ function logEvent(entry) {
     if (fs.existsSync(LOG_PATH) && fs.statSync(LOG_PATH).size > LOG_MAX_BYTES) {
       fs.renameSync(LOG_PATH, `${LOG_PATH}.old`);
     }
-    fs.appendFileSync(LOG_PATH, JSON.stringify({ ts: new Date().toISOString(), ...entry }) + '\n');
+    fs.appendFileSync(
+      LOG_PATH,
+      JSON.stringify({ ts: new Date().toISOString(), ...entry }) + "\n",
+    );
   } catch (err) {
     // best-effort logging only
   }
@@ -149,7 +172,12 @@ const alertingSessions = new Map(); // session_id -> { cwd, source, state: 'wavi
 let displayedAlertSessionId = null;
 let alertRotationTimeoutId = null;
 const ALERT_ROTATION_MS = 4000;
-const RESOLUTION_EVENTS = new Set(['PostToolUse', 'PostToolUseFailure', 'Stop', 'UserPromptSubmit']);
+const RESOLUTION_EVENTS = new Set([
+  "PostToolUse",
+  "PostToolUseFailure",
+  "Stop",
+  "UserPromptSubmit",
+]);
 
 function canDisplay(sessionId) {
   return alertingSessions.size === 0 || sessionId === displayedAlertSessionId;
@@ -161,16 +189,16 @@ function canDisplay(sessionId) {
 // waving payload just because showDisplayedAlert() ran again.
 function currentAlertPayload() {
   const info = alertingSessions.get(displayedAlertSessionId);
-  if (info && info.state === 'impatient') {
+  if (info && info.state === "impatient") {
     return {
-      hook_event_name: 'ImpatientTimeout',
+      hook_event_name: "ImpatientTimeout",
       cwd: info.cwd,
       _petSource: info.source,
     };
   }
   return {
-    hook_event_name: 'Notification',
-    notification_type: 'permission_prompt',
+    hook_event_name: "Notification",
+    notification_type: "permission_prompt",
     cwd: info && info.cwd,
     _petSource: info && info.source,
   };
@@ -178,7 +206,7 @@ function currentAlertPayload() {
 
 function showDisplayedAlert() {
   if (!displayedAlertSessionId || !win || win.isDestroyed()) return;
-  win.webContents.send('pet-event', currentAlertPayload());
+  win.webContents.send("pet-event", currentAlertPayload());
 }
 
 function scheduleAlertRotation() {
@@ -202,7 +230,11 @@ function claimAlert(sessionId, cwd, source) {
   // permission_prompt already escalated), and that must not visibly regress
   // the pet back to the calmer pose mid-wait.
   const existing = alertingSessions.get(sessionId);
-  alertingSessions.set(sessionId, { cwd, source, state: existing ? existing.state : 'waving' });
+  alertingSessions.set(sessionId, {
+    cwd,
+    source,
+    state: existing ? existing.state : "waving",
+  });
   if (!displayedAlertSessionId) {
     displayedAlertSessionId = sessionId;
     showDisplayedAlert();
@@ -217,7 +249,7 @@ function claimAlert(sessionId, cwd, source) {
 function markImpatient(sessionId) {
   const info = alertingSessions.get(sessionId);
   if (!info) return;
-  info.state = 'impatient';
+  info.state = "impatient";
   if (sessionId === displayedAlertSessionId) showDisplayedAlert();
 }
 
@@ -241,14 +273,22 @@ function startPermissionPromptTimers(sessionId, cwd, source) {
   const entry = { cwd, source };
   entry.impatientTimeoutId = setTimeout(() => {
     // Still waiting - trigger impatient animation
-    logEvent({ source: 'heuristic', event: 'ImpatientTimeout' });
+    logEvent({ source: "heuristic", event: "ImpatientTimeout" });
     markImpatient(sessionId);
   }, IMPATIENT_THRESHOLD_MS);
   entry.giveUpTimeoutId = setTimeout(() => {
-    logEvent({ source: 'heuristic', event: 'AlertGiveUp', session_id: sessionId, cwd });
+    logEvent({
+      source: "heuristic",
+      event: "AlertGiveUp",
+      session_id: sessionId,
+      cwd,
+    });
     pendingPermissionPrompts.delete(sessionId);
     releaseAlert(sessionId);
-    sendToPet({ hook_event_name: 'PreToolUse', tool_name: 'Bash', cwd }, sessionId);
+    sendToPet(
+      { hook_event_name: "PreToolUse", tool_name: "Bash", cwd },
+      sessionId,
+    );
   }, ALERT_GIVE_UP_MS);
   pendingPermissionPrompts.set(sessionId, entry);
 }
@@ -266,7 +306,7 @@ function releaseAlert(sessionId) {
 function sendToPet(petPayload, sessionId) {
   if (!canDisplay(sessionId)) return;
   if (win && !win.isDestroyed()) {
-    win.webContents.send('pet-event', petPayload);
+    win.webContents.send("pet-event", petPayload);
   }
 }
 
@@ -277,38 +317,55 @@ function sendToPet(petPayload, sessionId) {
 // of dev vs packaged, so a packaged app is truly "double-click and done" -
 // no separate script to run, no settings.json to hand-edit.
 const HOOK_EVENTS = [
-  'SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse',
-  'PostToolUseFailure', 'Stop', 'Notification', 'PreCompact', 'PostCompact',
+  "SessionStart",
+  "UserPromptSubmit",
+  "PreToolUse",
+  "PostToolUse",
+  "PostToolUseFailure",
+  "Stop",
+  "Notification",
+  "PreCompact",
+  "PostCompact",
 ];
-const HOOK_MATCHER_EVENTS = new Set(['PreToolUse', 'PostToolUse', 'PostToolUseFailure']);
+const HOOK_MATCHER_EVENTS = new Set([
+  "PreToolUse",
+  "PostToolUse",
+  "PostToolUseFailure",
+]);
 const HOOK_URL = `http://localhost:${PORT}/event`;
 
 function configureClaudeHooks() {
-  const settingsPath = path.join(os.homedir(), '.claude', 'settings.json');
+  const settingsPath = path.join(os.homedir(), ".claude", "settings.json");
   let settings = {};
   if (fs.existsSync(settingsPath)) {
     try {
-      settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+      settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
     } catch (err) {
       // Don't touch a file we can't safely parse - and don't let this stop
       // the pet itself from starting up.
-      logEvent({ source: 'app', event: 'hooks_config_parse_failed', error: String(err) });
+      logEvent({
+        source: "app",
+        event: "hooks_config_parse_failed",
+        error: String(err),
+      });
       return;
     }
   }
 
   settings.hooks = settings.hooks || {};
-  const hasOurHook = (entries) => (entries || []).some((entry) =>
-    (entry.hooks || []).some((h) => h.type === 'http' && h.url === HOOK_URL)
-  );
+  const hasOurHook = (entries) =>
+    (entries || []).some((entry) =>
+      (entry.hooks || []).some((h) => h.type === "http" && h.url === HOOK_URL),
+    );
 
   let changed = false;
   for (const event of HOOK_EVENTS) {
     if (hasOurHook(settings.hooks[event])) continue;
-    const matcher = HOOK_MATCHER_EVENTS.has(event) ? '.*' : undefined;
-    const entry = matcher != null
-      ? { matcher, hooks: [{ type: 'http', url: HOOK_URL, timeout: 5 }] }
-      : { hooks: [{ type: 'http', url: HOOK_URL, timeout: 5 }] };
+    const matcher = HOOK_MATCHER_EVENTS.has(event) ? ".*" : undefined;
+    const entry =
+      matcher != null
+        ? { matcher, hooks: [{ type: "http", url: HOOK_URL, timeout: 5 }] }
+        : { hooks: [{ type: "http", url: HOOK_URL, timeout: 5 }] };
     settings.hooks[event] = [...(settings.hooks[event] || []), entry];
     changed = true;
   }
@@ -320,16 +377,23 @@ function configureClaudeHooks() {
     if (fs.existsSync(settingsPath)) {
       fs.copyFileSync(settingsPath, `${settingsPath}.bak`);
     }
-    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n');
-    logEvent({ source: 'app', event: 'hooks_configured' });
+    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n");
+    logEvent({ source: "app", event: "hooks_configured" });
   } catch (err) {
-    logEvent({ source: 'app', event: 'hooks_config_write_failed', error: String(err) });
+    logEvent({
+      source: "app",
+      event: "hooks_config_write_failed",
+      error: String(err),
+    });
   }
 }
 
 function seedCodexForwardScript() {
   fs.mkdirSync(path.dirname(CODEX_FORWARD_SCRIPT_LIVE), { recursive: true });
-  fs.copyFileSync(path.join(__dirname, 'codex-hook-forward.js'), CODEX_FORWARD_SCRIPT_LIVE);
+  fs.copyFileSync(
+    path.join(__dirname, "codex-hook-forward.js"),
+    CODEX_FORWARD_SCRIPT_LIVE,
+  );
 }
 
 // Same idea as configureClaudeHooks() above, but for ~/.codex/hooks.json.
@@ -341,37 +405,86 @@ function seedCodexForwardScript() {
 // Codex also has SessionEnd/SubagentStart/SubagentStop, but nothing here
 // reacts to those yet.
 const CODEX_HOOK_EVENTS = [
-  'SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse',
-  'PermissionRequest', 'Stop', 'PreCompact', 'PostCompact',
+  "SessionStart",
+  "UserPromptSubmit",
+  "PreToolUse",
+  "PostToolUse",
+  "PermissionRequest",
+  "Stop",
+  "PreCompact",
+  "PostCompact",
 ];
-const CODEX_HOOK_MATCHER_EVENTS = new Set(['PreToolUse', 'PostToolUse']);
+const CODEX_HOOK_MATCHER_EVENTS = new Set(["PreToolUse", "PostToolUse"]);
+// Recognizes a hook entry as "one of ours" regardless of which past
+// CODEX_FORWARD_SCRIPT_LIVE path it points to (an app rename or userData
+// relocation changes that path) - narrow enough (the exact script filename
+// we author, wrapped exactly as `node "..."`) to never match an unrelated
+// hook the user configured themselves. Used below to prune stale copies of
+// our own registration instead of only ever appending new ones.
+function isOurCodexHookCommand(cmd) {
+  return typeof cmd === "string" && /^node ".*codex-hook-forward\.js"$/.test(cmd);
+}
 
 function configureCodexHooks() {
-  const hooksPath = path.join(os.homedir(), '.codex', 'hooks.json');
+  const hooksPath = path.join(os.homedir(), ".codex", "hooks.json");
   let config = {};
   if (fs.existsSync(hooksPath)) {
     try {
-      config = JSON.parse(fs.readFileSync(hooksPath, 'utf8'));
+      config = JSON.parse(fs.readFileSync(hooksPath, "utf8"));
     } catch (err) {
-      logEvent({ source: 'app', event: 'codex_hooks_config_parse_failed', error: String(err) });
+      logEvent({
+        source: "app",
+        event: "codex_hooks_config_parse_failed",
+        error: String(err),
+      });
       return;
     }
   }
 
   config.hooks = config.hooks || {};
   const command = `node "${CODEX_FORWARD_SCRIPT_LIVE}"`;
-  const hasOurHook = (entries) => (entries || []).some((entry) =>
-    (entry.hooks || []).some((h) => h.type === 'command' && h.command === command)
-  );
+  const hasOurHook = (entries) =>
+    (entries || []).some((entry) =>
+      (entry.hooks || []).some(
+        (h) => h.type === "command" && h.command === command,
+      ),
+    );
 
   let changed = false;
   for (const event of CODEX_HOOK_EVENTS) {
+    // Drop stale copies of our own hook (old app-identity paths) before
+    // deciding whether to add the current one - a plain exact-match check
+    // has no way to recognize "this is an old version of us", so it only
+    // ever appended, never pruned (review Finding 3). Anything that isn't
+    // our own command - including a user's own unrelated hooks on the same
+    // event - is left untouched.
+    let prunedAny = false;
+    const prunedEntries = (config.hooks[event] || [])
+      .map((entry) => {
+        const keptHooks = (entry.hooks || []).filter((h) => {
+          const isStaleOwnHook =
+            h.type === "command" &&
+            isOurCodexHookCommand(h.command) &&
+            h.command !== command;
+          if (isStaleOwnHook) prunedAny = true;
+          return !isStaleOwnHook;
+        });
+        return { ...entry, hooks: keptHooks };
+      })
+      .filter((entry) => entry.hooks.length > 0);
+    config.hooks[event] = prunedEntries;
+    if (prunedAny) changed = true;
+
     if (hasOurHook(config.hooks[event])) continue;
-    const matcher = CODEX_HOOK_MATCHER_EVENTS.has(event) ? '.*' : undefined;
-    const entry = matcher != null
-      ? { matcher, hooks: [{ type: 'command', command, timeout: 5, async: true }] }
-      : { hooks: [{ type: 'command', command, timeout: 5, async: true }] };
-    config.hooks[event] = [...(config.hooks[event] || []), entry];
+    const matcher = CODEX_HOOK_MATCHER_EVENTS.has(event) ? ".*" : undefined;
+    const entry =
+      matcher != null
+        ? {
+            matcher,
+            hooks: [{ type: "command", command, timeout: 5, async: true }],
+          }
+        : { hooks: [{ type: "command", command, timeout: 5, async: true }] };
+    config.hooks[event] = [...config.hooks[event], entry];
     changed = true;
   }
 
@@ -382,11 +495,117 @@ function configureCodexHooks() {
     if (fs.existsSync(hooksPath)) {
       fs.copyFileSync(hooksPath, `${hooksPath}.bak`);
     }
-    fs.writeFileSync(hooksPath, JSON.stringify(config, null, 2) + '\n');
-    logEvent({ source: 'app', event: 'codex_hooks_configured' });
+    fs.writeFileSync(hooksPath, JSON.stringify(config, null, 2) + "\n");
+    logEvent({ source: "app", event: "codex_hooks_configured" });
   } catch (err) {
-    logEvent({ source: 'app', event: 'codex_hooks_config_write_failed', error: String(err) });
+    logEvent({
+      source: "app",
+      event: "codex_hooks_config_write_failed",
+      error: String(err),
+    });
   }
+}
+
+// Reuses the GitHub Release the user already cuts for every build (see
+// AgentPet-Downloads repo) as the version source of truth, instead of
+// maintaining a separate version-manifest file - "ship a new version" and
+// "the update check sees it" end up being the same action.
+const UPDATE_CHECK_URL =
+  "https://api.github.com/repos/MoraLin/AgentPet-Downloads/releases/latest";
+const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000; // once a day - see conversation with user
+const UPDATE_CHECK_TIMEOUT_MS = 5000;
+// Set once a newer release is found - read by the context menu builder
+// (see 'pet-show-context-menu' below) to show a persistent "download the new
+// version" item, and survives after the on-pet badge (src/renderer.js's
+// showUpdateBadge()) fades out.
+let availableUpdate = null;
+// Loaded once at startup, not on every right-click menu open - nativeImage
+// can't load .svg directly (see its docs' supported-extensions list), so
+// the source SVG (src/assets/icons/update-available.svg, also used by the
+// on-pet badge via a plain <img>) has a matching rasterized .png for this.
+const UPDATE_MENU_ICON = nativeImage
+  .createFromPath(path.join(__dirname, "src", "assets", "icons", "update-available.png"))
+  .resize({ width: 16, height: 16 });
+
+// Compares two dotted version strings numerically per segment - a plain
+// string/lexicographic compare would wrongly rank "1.10.0" below "1.2.0".
+// Missing trailing segments count as 0, so "1.2" == "1.2.0".
+function isNewerVersion(remoteVersion, localVersion) {
+  const remoteParts = remoteVersion.split(".").map(Number);
+  const localParts = localVersion.split(".").map(Number);
+  const len = Math.max(remoteParts.length, localParts.length);
+  for (let i = 0; i < len; i++) {
+    const r = remoteParts[i] || 0;
+    const l = localParts[i] || 0;
+    if (r > l) return true;
+    if (r < l) return false;
+  }
+  return false;
+}
+
+// Never blocks startup and never surfaces as an error to the user - a failed
+// check (offline, GitHub rate-limited, releases repo renamed) just means no
+// notification this cycle, same as if nothing had changed. Only failures are
+// logged, not routine "already up to date" checks, to avoid a log line every
+// single day for the common case.
+function checkForUpdate() {
+  const req = https.get(
+    UPDATE_CHECK_URL,
+    {
+      headers: { "User-Agent": "Agent-Pet-App" },
+      timeout: UPDATE_CHECK_TIMEOUT_MS,
+    },
+    (res) => {
+      let body = "";
+      res.on("data", (chunk) => {
+        body += chunk;
+      });
+      res.on("end", () => {
+        try {
+          const release = JSON.parse(body);
+          const remoteVersion = String(release.tag_name || "").replace(
+            /^v/,
+            "",
+          );
+          const localVersion = app.getVersion();
+          if (!remoteVersion || !isNewerVersion(remoteVersion, localVersion))
+            return;
+
+          logEvent({
+            source: "app",
+            event: "update_available",
+            remoteVersion,
+            localVersion,
+          });
+          availableUpdate = {
+            version: remoteVersion,
+            url:
+              release.html_url ||
+              "https://github.com/MoraLin/AgentPet-Downloads/releases/latest",
+          };
+          if (win && !win.isDestroyed()) {
+            win.webContents.send("pet-update-available", {
+              version: remoteVersion,
+            });
+          }
+        } catch (err) {
+          logEvent({
+            source: "app",
+            event: "update_check_parse_failed",
+            error: String(err),
+          });
+        }
+      });
+    },
+  );
+  req.on("error", (err) => {
+    logEvent({
+      source: "app",
+      event: "update_check_failed",
+      error: String(err),
+    });
+  });
+  req.on("timeout", () => req.destroy());
 }
 
 // The display the window is currently sized to match exactly. A window that
@@ -410,13 +629,17 @@ function sendPetInit(drop) {
     if (!win || win.isDestroyed()) return;
     const bounds = win.getBounds();
     const payload = {
-      viewW: currentDisplay.bounds.width - Math.max(0, bounds.x - currentDisplay.bounds.x),
-      viewH: currentDisplay.bounds.height - Math.max(0, bounds.y - currentDisplay.bounds.y),
+      viewW:
+        currentDisplay.bounds.width -
+        Math.max(0, bounds.x - currentDisplay.bounds.x),
+      viewH:
+        currentDisplay.bounds.height -
+        Math.max(0, bounds.y - currentDisplay.bounds.y),
     };
     if (drop) {
       payload.drop = { x: drop.screenX - bounds.x, y: drop.screenY - bounds.y };
     }
-    win.webContents.send('pet-init', payload);
+    win.webContents.send("pet-init", payload);
   }, 500);
 }
 
@@ -426,7 +649,7 @@ function sendPetInit(drop) {
 // always-on-top level on its own afterward, so anything that shows a dialog
 // on top of `win` needs to reapply this once the dialog closes.
 function applyAlwaysOnTop(targetWin) {
-  targetWin.setAlwaysOnTop(true, 'screen-saver');
+  targetWin.setAlwaysOnTop(true, "screen-saver");
   targetWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
 }
 
@@ -447,7 +670,7 @@ function createWindow() {
     skipTaskbar: true,
     alwaysOnTop: true,
     webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
+      preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
       // Only the preload script (still fully trusted, local code) needs
@@ -463,11 +686,15 @@ function createWindow() {
   // The window is fully transparent, so a crashed renderer just looks like
   // the pet silently vanished with no way to tell what happened. Reload the
   // page instead of leaving it dead.
-  win.webContents.on('render-process-gone', (_event, details) => {
-    console.error('Pet renderer process gone, reloading:', details.reason);
-    logEvent({ source: 'app', event: 'render-process-gone', reason: details.reason });
+  win.webContents.on("render-process-gone", (_event, details) => {
+    console.error("Pet renderer process gone, reloading:", details.reason);
+    logEvent({
+      source: "app",
+      event: "render-process-gone",
+      reason: details.reason,
+    });
     if (win && !win.isDestroyed()) {
-      win.loadFile('index.html');
+      win.loadFile("index.html");
     }
   });
 
@@ -475,13 +702,13 @@ function createWindow() {
   // which fires 'did-finish-load' again - the freshly-reloaded page needs
   // the same menu-bar-offset-corrected viewW/viewH as the very first load,
   // not just the raw (uncorrected) window.innerWidth/innerHeight fallback.
-  win.webContents.on('did-finish-load', () => sendPetInit(null));
+  win.webContents.on("did-finish-load", () => sendPetInit(null));
 
-  win.loadFile('index.html');
+  win.loadFile("index.html");
 }
 
 function setupInteraction() {
-  ipcMain.on('pet-set-ignore-mouse-events', (_event, ignore) => {
+  ipcMain.on("pet-set-ignore-mouse-events", (_event, ignore) => {
     if (win && !win.isDestroyed()) {
       win.setIgnoreMouseEvents(ignore, { forward: true });
     }
@@ -489,8 +716,8 @@ function setupInteraction() {
 
   // Uncaught renderer-side JS errors, forwarded through main so they land
   // in the same log file as everything else.
-  ipcMain.on('pet-log-error', (_event, data) => {
-    logEvent({ source: 'renderer', ...data });
+  ipcMain.on("pet-log-error", (_event, data) => {
+    logEvent({ source: "renderer", ...data });
   });
 
   // A drag ended at this real screen point - relocate the window to whichever
@@ -498,7 +725,7 @@ function setupInteraction() {
   // within the same display is handled entirely renderer-side and needs no
   // help from here). getDisplayNearestPoint also handles a drop that lands in
   // a gap between two mismatched displays by snapping to the closest one.
-  ipcMain.on('pet-drag-end', (_event, { screenX, screenY }) => {
+  ipcMain.on("pet-drag-end", (_event, { screenX, screenY }) => {
     if (!win || win.isDestroyed()) return;
     const target = screen.getDisplayNearestPoint({ x: screenX, y: screenY });
     if (target.id === currentDisplay.id) return;
@@ -514,28 +741,34 @@ function setupInteraction() {
     // closes - reapply no matter which path this function exits through.
     try {
       const result = await dialog.showOpenDialog(win, {
-        title: '選擇存放 GIF 的資料夾',
-        properties: ['openDirectory'],
+        title: "選擇存放 GIF 的資料夾",
+        properties: ["openDirectory"],
       });
       if (result.canceled || result.filePaths.length === 0) return;
       const sourceDir = result.filePaths[0];
 
       let gifFiles;
       try {
-        gifFiles = fs.readdirSync(sourceDir).filter((f) => f.toLowerCase().endsWith('.gif'));
+        gifFiles = fs
+          .readdirSync(sourceDir)
+          .filter((f) => f.toLowerCase().endsWith(".gif"));
       } catch (err) {
-        dialog.showMessageBoxSync(win, { type: 'error', message: '無法讀取這個資料夾', detail: String(err) });
+        dialog.showMessageBoxSync(win, {
+          type: "error",
+          message: "無法讀取這個資料夾",
+          detail: String(err),
+        });
         return;
       }
 
       const missing = REQUIRED_SKIN_KEYWORDS.filter(
-        (keyword) => !gifFiles.some((f) => matchesKeyword(f, keyword))
+        (keyword) => !gifFiles.some((f) => matchesKeyword(f, keyword)),
       );
       if (missing.length > 0) {
         dialog.showMessageBoxSync(win, {
-          type: 'error',
-          message: '這個資料夾缺少必要的 GIF,沒有套用',
-          detail: `缺少關鍵字:${missing.join('、')}\n\n每個關鍵字都要有一個對應的 .gif 檔案(檔名格式:<前綴>-<關鍵字>.gif)。`,
+          type: "error",
+          message: "這個資料夾缺少必要的 GIF,沒有套用",
+          detail: `缺少關鍵字:${missing.join("、")}\n\n每個關鍵字都要有一個對應的 .gif 檔案(檔名格式:<前綴>-<關鍵字>.gif)。`,
         });
         return;
       }
@@ -548,10 +781,17 @@ function setupInteraction() {
           fs.unlinkSync(path.join(SKIN_LIVE_DIR, file));
         }
         for (const file of gifFiles) {
-          fs.copyFileSync(path.join(sourceDir, file), path.join(SKIN_LIVE_DIR, file));
+          fs.copyFileSync(
+            path.join(sourceDir, file),
+            path.join(SKIN_LIVE_DIR, file),
+          );
         }
       } catch (err) {
-        dialog.showMessageBoxSync(win, { type: 'error', message: '套用新外觀時發生錯誤', detail: String(err) });
+        dialog.showMessageBoxSync(win, {
+          type: "error",
+          message: "套用新外觀時發生錯誤",
+          detail: String(err),
+        });
         return;
       }
 
@@ -563,12 +803,12 @@ function setupInteraction() {
 
   function setBoredomMs(ms) {
     boredomMs = ms;
-    win.webContents.send('pet-set-boredom-ms', ms);
+    win.webContents.send("pet-set-boredom-ms", ms);
   }
 
-  ipcMain.on('pet-show-context-menu', () => {
+  ipcMain.on("pet-show-context-menu", () => {
     if (!win || win.isDestroyed()) return;
-    const preview = (name) => () => win.webContents.send('pet-preview', name);
+    const preview = (name) => () => win.webContents.send("pet-preview", name);
     // 這版想做單純一點，先把整個「預覽動畫」選單藏起來 - 之後要開放測試再打開。
     // {
     //   label: '預覽動畫',
@@ -596,59 +836,99 @@ function setupInteraction() {
     // { type: 'separator' },
     const menu = Menu.buildFromTemplate([
       {
-        label: '匯入寵物外觀... Import Skin...',
+        label: "匯入寵物外觀... Import Skin...",
         click: importSkin,
       },
-      { type: 'separator' },
+      { type: "separator" },
       {
-        label: '閒置自動走動 Auto-Wander',
-        type: 'checkbox',
+        label: "閒置自動走動 Auto-Wander",
+        type: "checkbox",
         checked: wanderEnabled,
         click: () => {
           wanderEnabled = !wanderEnabled;
-          win.webContents.send('pet-set-wander', wanderEnabled);
+          win.webContents.send("pet-set-wander", wanderEnabled);
         },
       },
       {
-        label: '睡著時間 Sleep Timer',
+        label: "睡著時間 Sleep Timer",
         submenu: [
-          { label: '30 秒 30s', type: 'radio', checked: boredomMs === 30000, click: () => setBoredomMs(30000) },
-          { label: '90 秒(預設) 90s (Default)', type: 'radio', checked: boredomMs === 90000, click: () => setBoredomMs(90000) },
-          { label: '3 分鐘 3min', type: 'radio', checked: boredomMs === 180000, click: () => setBoredomMs(180000) },
-          { label: '5 分鐘 5min', type: 'radio', checked: boredomMs === 300000, click: () => setBoredomMs(300000) },
-          { label: '永不睡著 Never', type: 'radio', checked: boredomMs === Infinity, click: () => setBoredomMs(Infinity) },
+          {
+            label: "30 秒 30s",
+            type: "radio",
+            checked: boredomMs === 30000,
+            click: () => setBoredomMs(30000),
+          },
+          {
+            label: "90 秒(預設) 90s (Default)",
+            type: "radio",
+            checked: boredomMs === 90000,
+            click: () => setBoredomMs(90000),
+          },
+          {
+            label: "3 分鐘 3min",
+            type: "radio",
+            checked: boredomMs === 180000,
+            click: () => setBoredomMs(180000),
+          },
+          {
+            label: "5 分鐘 5min",
+            type: "radio",
+            checked: boredomMs === 300000,
+            click: () => setBoredomMs(300000),
+          },
+          {
+            label: "永不睡著 Never",
+            type: "radio",
+            checked: boredomMs === Infinity,
+            click: () => setBoredomMs(Infinity),
+          },
         ],
       },
-      { type: 'separator' },
+      { type: "separator" },
+      ...(availableUpdate
+        ? [
+            {
+              label: `New Version (v${availableUpdate.version})`,
+              icon: UPDATE_MENU_ICON,
+              click: () => shell.openExternal(availableUpdate.url),
+            },
+            { type: "separator" },
+          ]
+        : []),
       {
-        label: '重新啟動 Restart',
+        label: "重新啟動 Restart",
         click: () => {
           app.relaunch();
           app.exit(0);
         },
       },
-      { type: 'separator' },
-      { label: '結束 Quit', click: () => app.quit() },
+      { type: "separator" },
+      { label: "結束 Quit", click: () => app.quit() },
     ]);
     // Like the importSkin dialogs, this native popup can leave the window's
     // always-on-top level reset once it closes - reapply via the callback
     // that fires on close, whether or not an item was clicked.
-    menu.popup({ window: win, callback: () => { if (win && !win.isDestroyed()) applyAlwaysOnTop(win); } });
+    menu.popup({
+      window: win,
+      callback: () => {
+        if (win && !win.isDestroyed()) applyAlwaysOnTop(win);
+      },
+    });
   });
 }
 
 function startServer() {
   const server = http.createServer((req, res) => {
-    if (req.method !== 'POST' || req.url !== '/event') {
+    if (req.method !== "POST" || req.url !== "/event") {
       res.writeHead(404).end();
       return;
     }
 
-    let body = '';
-    req.on('data', (chunk) => {
+    let body = "";
+    req.on("data", (chunk) => {
       body += chunk;
     });
-    req.on('end', () => {
+    req.on("end", () => {
       res.writeHead(200).end();
       try {
         const payload = JSON.parse(body);
@@ -657,15 +937,15 @@ function startServer() {
         // Normalizing it into the same shape here means every heuristic below
         // (timers, alert rotation, mapHookEvent) handles both sources without
         // being duplicated.
-        if (payload && payload.hook_event_name === 'PermissionRequest') {
-          payload.hook_event_name = 'Notification';
-          payload.notification_type = 'permission_prompt';
+        if (payload && payload.hook_event_name === "PermissionRequest") {
+          payload.hook_event_name = "Notification";
+          payload.notification_type = "permission_prompt";
         }
         const eventName = payload && payload.hook_event_name;
 
-        if (eventName === 'PostToolUseFailure') {
+        if (eventName === "PostToolUseFailure") {
           logEvent({
-            source: 'hook',
+            source: "hook",
             event: eventName,
             tool_name: payload.tool_name,
             session_id: payload.session_id,
@@ -676,16 +956,27 @@ function startServer() {
         // Track permission prompts for impatient animation. The notification's
         // message text varies ("Do you want to proceed?" etc.) so we key off
         // notification_type, which is reliably "permission_prompt".
-        if (eventName === 'Notification' && payload.notification_type === 'permission_prompt') {
-          startPermissionPromptTimers(payload.session_id, payload.cwd, payload._petSource);
+        if (
+          eventName === "Notification" &&
+          payload.notification_type === "permission_prompt"
+        ) {
+          startPermissionPromptTimers(
+            payload.session_id,
+            payload.cwd,
+            payload._petSource,
+          );
         }
 
         // Clear timing when permission is resolved. The prompt being answered
         // doesn't fire its own event - the next sign of life is normally the
         // approved tool call actually finishing (PostToolUse), which can
         // happen well before Stop if more steps follow in the same turn.
-        if (eventName === 'Stop' || eventName === 'UserPromptSubmit' ||
-            eventName === 'PostToolUse' || eventName === 'PostToolUseFailure') {
+        if (
+          eventName === "Stop" ||
+          eventName === "UserPromptSubmit" ||
+          eventName === "PostToolUse" ||
+          eventName === "PostToolUseFailure"
+        ) {
           const pending = pendingPermissionPrompts.get(payload.session_id);
           if (pending) {
             clearTimeout(pending.impatientTimeoutId);
@@ -698,7 +989,7 @@ function startServer() {
         }
 
         // Track Bash calls for the "possibly stuck on its own prompt" alert.
-        if (eventName === 'PreToolUse' && payload.tool_name === 'Bash') {
+        if (eventName === "PreToolUse" && payload.tool_name === "Bash") {
           const sessionId = payload.session_id;
           const cwd = payload.cwd;
           const source = payload._petSource;
@@ -707,7 +998,7 @@ function startServer() {
 
           const entry = { cwd, source };
           entry.timeoutId = setTimeout(() => {
-            logEvent({ source: 'heuristic', event: 'BashPendingTimeout' });
+            logEvent({ source: "heuristic", event: "BashPendingTimeout" });
             // startPermissionPromptTimers() -> claimAlert() already pushes
             // this to the renderer via showDisplayedAlert() when it becomes
             // the shown session (or it'll pick it up on the next rotation
@@ -720,8 +1011,12 @@ function startServer() {
         }
 
         // Clear once the Bash call actually finishes (normally or with an error).
-        if (eventName === 'PostToolUse' || eventName === 'PostToolUseFailure' ||
-            eventName === 'Stop' || eventName === 'UserPromptSubmit') {
+        if (
+          eventName === "PostToolUse" ||
+          eventName === "PostToolUseFailure" ||
+          eventName === "Stop" ||
+          eventName === "UserPromptSubmit"
+        ) {
           const pending = pendingBashCalls.get(payload.session_id);
           if (pending) {
             clearTimeout(pending.timeoutId);
@@ -731,7 +1026,11 @@ function startServer() {
 
         sendToPet(payload, payload.session_id);
       } catch (err) {
-        logEvent({ source: 'app', event: 'malformed_hook_payload', error: String(err) });
+        logEvent({
+          source: "app",
+          event: "malformed_hook_payload",
+          error: String(err),
+        });
       }
     });
   });
@@ -739,11 +1038,15 @@ function startServer() {
   // Without this, a port conflict (e.g. the pet already running, or a
   // second instance launched by mistake) is an uncaught exception that
   // silently kills the whole app - no window, no error visible anywhere.
-  server.on('error', (err) => {
-    logEvent({ source: 'app', event: 'server_listen_failed', error: String(err) });
+  server.on("error", (err) => {
+    logEvent({
+      source: "app",
+      event: "server_listen_failed",
+      error: String(err),
+    });
   });
 
-  server.listen(PORT, '127.0.0.1');
+  server.listen(PORT, "127.0.0.1");
 }
 
 // Windows has no OS-level guard against launching the same .exe twice - unlike
@@ -756,15 +1059,15 @@ function startServer() {
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
-  app.on('second-instance', () => {
+  app.on("second-instance", () => {
     if (win && !win.isDestroyed()) {
       applyAlwaysOnTop(win);
     }
   });
 
   app.whenReady().then(() => {
-    logEvent({ source: 'app', event: 'started', pid: process.pid });
-    if (process.platform === 'darwin') {
+    logEvent({ source: "app", event: "started", pid: process.pid });
+    if (process.platform === "darwin") {
       app.dock.hide();
     }
     configureClaudeHooks();
@@ -774,9 +1077,11 @@ if (!app.requestSingleInstanceLock()) {
     createWindow();
     setupInteraction();
     startServer();
+    checkForUpdate();
+    setInterval(checkForUpdate, UPDATE_CHECK_INTERVAL_MS);
   });
 }
 
-app.on('window-all-closed', () => {
+app.on("window-all-closed", () => {
   app.quit();
 });

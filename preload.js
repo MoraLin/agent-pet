@@ -43,6 +43,9 @@ contextBridge.exposeInMainWorld('petAPI', {
   onSetBoredomMs: (callback) => {
     ipcRenderer.on('pet-set-boredom-ms', (_event, ms) => callback(ms));
   },
+  onUpdateAvailable: (callback) => {
+    ipcRenderer.on('pet-update-available', (_event, payload) => callback(payload));
+  },
   setIgnoreMouseEvents: (ignore) => {
     ipcRenderer.send('pet-set-ignore-mouse-events', ignore);
   },

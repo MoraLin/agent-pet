@@ -1,6 +1,7 @@
 const dinoWrap = document.getElementById('dino-wrap');
 const dinoImg = document.getElementById('dino');
 const emoteEl = document.getElementById('emote');
+const updateBadgeEl = document.getElementById('update-badge');
 
 const WRAP_SIZE = 96;
 const WALK_SPEED = 40; // px per second, casual wandering
@@ -86,6 +87,10 @@ const SLEEP_RIGHT_SRC = resolveGif('look-right-side', false) || STAND_SRC;
 // "success" pose, so a pack missing it just shows the idle gif on Stop
 // instead of the app refusing to start.
 const SUCCESS_SRC = resolveGif('success', false) || STAND_SRC;
+// Badged on top of the (often fallback-to-idle) success pose above, since
+// most skin packs don't bother with a dedicated "success" gif and Stop would
+// otherwise look identical to plain idle - see mapHookEvent's 'Stop' case.
+const SUCCESS_ICON_SRC = 'src/assets/icons/success.svg';
 let currentAnimCls = null;
 
 // Warm the browser's image cache up front so cycling frames during an
@@ -187,6 +192,24 @@ function setEmote(text, floaty, iconSrc) {
   // label (and/or a source icon) tacked on, which needs different styling
   // (smaller, no wrap, a background pill) to stay readable.
   emoteEl.classList.toggle('emote-label', !!iconSrc || /[a-zA-Z0-9]/.test(text || ''));
+}
+
+// Deliberately independent of setAnim()/enterOverride()/setEmote() - a new
+// app version being available has nothing to do with whatever Claude
+// Code/Codex hook state the pet is currently reflecting, so it must not
+// interrupt or get interrupted by that pose/emote system. Shows for a fixed
+// window regardless of what else happens; main.js's context menu is the
+// persistent way to reach the download page after this fades out.
+let updateBadgeTimeoutId = null;
+const UPDATE_BADGE_DURATION_MS = 60000;
+function showUpdateBadge() {
+  if (!updateBadgeEl) return;
+  updateBadgeEl.classList.add('show');
+  if (updateBadgeTimeoutId) clearTimeout(updateBadgeTimeoutId);
+  updateBadgeTimeoutId = setTimeout(() => {
+    updateBadgeEl.classList.remove('show');
+    updateBadgeTimeoutId = null;
+  }, UPDATE_BADGE_DURATION_MS);
 }
 
 // The old run artwork was drawn facing left by default, opposite of every
@@ -430,7 +453,7 @@ function mapHookEvent(payload) {
     case 'PostToolUseFailure':
       return { anim: 'anim-sad', emoji: '', duration: 3000, corner: true };
     case 'Stop':
-      return { anim: 'anim-success', emoji: '', duration: 3000 };
+      return { anim: 'anim-success', emoji: '', duration: 3000, icon: SUCCESS_ICON_SRC };
     case 'Notification':
       // Only react to permission prompts ("Do you want to proceed?" etc.).
       // Other notifications (e.g. the idle-waiting reminder) fall through
@@ -626,6 +649,10 @@ if (window.petAPI && window.petAPI.onPreview) {
 
 if (window.petAPI && window.petAPI.onSetWander) {
   window.petAPI.onSetWander(setWanderEnabled);
+}
+
+if (window.petAPI && window.petAPI.onUpdateAvailable) {
+  window.petAPI.onUpdateAvailable(showUpdateBadge);
 }
 
 if (window.petAPI && window.petAPI.onSetBoredomMs) {
