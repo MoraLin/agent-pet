@@ -120,6 +120,13 @@ jobs:
           name: windows-binary
           path: dist
 
+      - name: Verify DOWNLOADS_REPO_TOKEN is configured
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::DOWNLOADS_REPO_TOKEN is not configured"
+            exit 1
+          fi
+
       - name: Fail if a release for this tag already exists
         run: |
           if gh release view "${GITHUB_REF_NAME}" --repo "${DOWNLOADS_REPO}" >/dev/null 2>&1; then
