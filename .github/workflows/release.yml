@@ -16,18 +16,31 @@ jobs:
   verify-version:
     name: Verify tag matches package.json version
     runs-on: ubuntu-latest
+    outputs:
+      is_prerelease: ${{ steps.check.outputs.is_prerelease }}
     steps:
       - uses: actions/checkout@v4
       - name: Compare tag to package.json version
+        id: check
         if: startsWith(github.ref, 'refs/tags/')
         run: |
           TAG_VERSION="${GITHUB_REF_NAME#v}"
+          # A prerelease tag (e.g. "1.2.0-rc.1") is tested against the base
+          # version before the first "-" - package.json stays at the plain
+          # target version ("1.2.0") for both the RC and the real release.
+          BASE_VERSION="${TAG_VERSION%%-*}"
           PKG_VERSION=$(node -p "require('./package.json').version")
-          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
-            echo "::error::Tag ${GITHUB_REF_NAME} does not match package.json version (${PKG_VERSION})"
+          if [ "$BASE_VERSION" != "$PKG_VERSION" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} (base version $BASE_VERSION) does not match package.json version (${PKG_VERSION})"
             exit 1
           fi
-          echo "Verified: tag ${GITHUB_REF_NAME} matches package.json version ${PKG_VERSION}"
+          if [ "$TAG_VERSION" != "$BASE_VERSION" ]; then
+            echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "Verified: tag ${GITHUB_REF_NAME} is a prerelease of package.json version ${PKG_VERSION}"
+          else
+            echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
+            echo "Verified: tag ${GITHUB_REF_NAME} matches package.json version ${PKG_VERSION}"
+          fi
 
   lint-and-test:
     name: Lint & test
@@ -116,10 +129,15 @@ jobs:
 
       - name: Create GitHub Release on Downloads repo
         run: |
+          PRERELEASE_FLAG=()
+          if [ "${{ needs.verify-version.outputs.is_prerelease }}" = "true" ]; then
+            PRERELEASE_FLAG=(--prerelease)
+          fi
           gh release create "${GITHUB_REF_NAME}" \
             --repo "${DOWNLOADS_REPO}" \
             --title "Agent Pet ${GITHUB_REF_NAME}" \
             --notes-file RELEASE_NOTES.md \
+            "${PRERELEASE_FLAG[@]}" \
             dist/Agent-Pet-arm64.dmg \
             dist/Agent-Pet-x64.dmg \
             dist/Agent-Pet-win.exe
