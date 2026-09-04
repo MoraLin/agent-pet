@@ -115,8 +115,8 @@ function seedCodexForwardScript() {
 // own alongside the pet.
 function notifyHooksNeedTrust() {
   const notice = new BrowserWindow({
-    width: 440,
-    height: 280,
+    width: 460,
+    height: 230,
     center: true,
     resizable: false,
     minimizable: false,
