@@ -27,19 +27,42 @@ const CODEX_HOOK_MATCHER_EVENTS = new Set(["PreToolUse", "PostToolUse"]);
 
 // Recognizes a hook entry as "one of ours" regardless of which past
 // CODEX_FORWARD_SCRIPT_LIVE path it points to (an app rename or userData
-// relocation changes that path) - narrow enough (the exact script filename
-// we author, wrapped exactly as `node "..."`) to never match an unrelated
-// hook the user configured themselves. Used below to prune stale copies of
-// our own registration instead of only ever appending new ones.
+// relocation changes that path), and regardless of which command form
+// wrapped it (see buildCodexHookCommand) - narrow enough (the exact script
+// filename we author, launched by `node` or by our own env-var-prefixed
+// Electron invocation) to never match an unrelated hook the user configured
+// themselves. Used below to prune stale copies of our own registration
+// instead of only ever appending new ones.
 function isOurCodexHookCommand(cmd) {
-  return typeof cmd === "string" && /^node ".*codex-hook-forward\.js"$/.test(cmd);
+  return (
+    typeof cmd === "string" &&
+    /"[^"]*codex-hook-forward\.js"$/.test(cmd) &&
+    (/^node "/.test(cmd) || cmd.includes("ELECTRON_RUN_AS_NODE=1"))
+  );
 }
 
-// Codex CLI spawns hook commands with plain system `node`, which can't read
-// inside a packaged app's app.asar - so codex-hook-forward.js has to be
-// copied out to a real writable path first. Unlike the skin folder, this
-// file is never user-edited, so it's re-copied on every launch to always
-// match the running app version.
+// Codex runs "command" hooks through the system shell (cmd.exe /c on
+// Windows, the user's $SHELL on POSIX), whose PATH frequently has no `node`
+// on it at all - Codex CLI ships its own private Node runtime that it never
+// adds to PATH, so a plain `node "..."` command silently fails to spawn and
+// the hook never fires (see https://github.com/openai/codex hooks docs).
+// Rather than depend on the user having a separate Node install, run the
+// forward script with this Electron app's own binary, which behaves as a
+// plain Node runtime when ELECTRON_RUN_AS_NODE=1 is set - guaranteed to
+// exist since it's the same binary already running the pet.
+function buildCodexHookCommand() {
+  const execPath = process.execPath;
+  const script = paths.CODEX_FORWARD_SCRIPT_LIVE;
+  return process.platform === "win32"
+    ? `set ELECTRON_RUN_AS_NODE=1 && "${execPath}" "${script}"`
+    : `ELECTRON_RUN_AS_NODE=1 "${execPath}" "${script}"`;
+}
+
+// The command built by buildCodexHookCommand() can't read inside a packaged
+// app's app.asar - so codex-hook-forward.js has to be copied out to a real
+// writable path first. Unlike the skin folder, this file is never
+// user-edited, so it's re-copied on every launch to always match the
+// running app version.
 function seedCodexForwardScript() {
   fs.mkdirSync(path.dirname(paths.CODEX_FORWARD_SCRIPT_LIVE), {
     recursive: true,
@@ -67,7 +90,7 @@ function configureCodexHooks() {
   }
 
   config.hooks = config.hooks || {};
-  const command = `node "${paths.CODEX_FORWARD_SCRIPT_LIVE}"`;
+  const command = buildCodexHookCommand();
   const hasOurHook = (entries) =>
     (entries || []).some((entry) =>
       (entry.hooks || []).some(
