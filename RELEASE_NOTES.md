@@ -1,4 +1,4 @@
-# Agent Pet v1.2.0
+# Agent Pet v1.3.0
 
 ## What's New
 
