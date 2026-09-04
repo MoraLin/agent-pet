@@ -29,6 +29,12 @@ module.exports = {
     "update-available.png",
   ),
   CODEX_FORWARD_SCRIPT_SOURCE: path.join(APP_ROOT, "codex-hook-forward.js"),
+  CODEX_HOOKS_NOTICE_HTML: path.join(
+    APP_ROOT,
+    "src",
+    "assets",
+    "codex-hooks-notice.html",
+  ),
 
   // Writable per-user runtime data - would fail silently (or not exist at
   // all) if pointed at the read-only app bundle in a packaged build.

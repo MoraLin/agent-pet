@@ -2,6 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const os = require("os");
 const { execFileSync } = require("child_process");
+const { BrowserWindow } = require("electron");
 const paths = require("../paths");
 const { logEvent } = require("../logger");
 const { writeJsonAtomic } = require("./atomic-write");
@@ -97,8 +98,48 @@ function seedCodexForwardScript() {
   );
 }
 
+// Codex re-flags a hook for manual review in `/hooks` any time its command
+// text changes on disk - even reverting to a previously-trusted value still
+// triggers this (confirmed by hand, not just from Codex's docs), so there's
+// no way for us to write a genuinely different command and have it "just
+// work" for the user. The best available fix is telling them what to do the
+// moment it happens, instead of a pet that silently stops reacting to Codex
+// with no clue why.
+//
+// A plain OS-native dialog (dialog.showMessageBox/Sync) can't bold or color
+// specific words, and the exact commands to run (/hooks, t) get lost in a
+// wall of same-weight black text - so this loads a small standalone window
+// instead, which can highlight them. Not parented/modal to the pet's own
+// window (that's a transparent always-on-top overlay, not a normal window)
+// and doesn't block configureCodexHooks()'s caller - it just pops up on its
+// own alongside the pet.
+function notifyHooksNeedTrust() {
+  const notice = new BrowserWindow({
+    width: 440,
+    height: 280,
+    center: true,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    alwaysOnTop: true,
+    autoHideMenuBar: true,
+    title: "Agent Pet",
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  });
+  notice.loadFile(paths.CODEX_HOOKS_NOTICE_HTML);
+}
+
 function configureCodexHooks() {
   const hooksPath = path.join(os.homedir(), ".codex", "hooks.json");
+  // Only used to decide whether to bother the user with notifyHooksNeedTrust()
+  // below - Codex itself creates this directory on first run, so its absence
+  // means Codex isn't actually installed/used here, and a "go trust this in
+  // Codex" popup would just be confusing noise.
+  const codexLooksInstalled = fs.existsSync(path.join(os.homedir(), ".codex"));
   let config = {};
   if (fs.existsSync(hooksPath)) {
     try {
@@ -162,10 +203,11 @@ function configureCodexHooks() {
 
   if (!changed) return;
 
-  writeJsonAtomic(hooksPath, config, {
+  const wrote = writeJsonAtomic(hooksPath, config, {
     successEvent: "codex_hooks_configured",
     failureEvent: "codex_hooks_config_write_failed",
   });
+  if (wrote && codexLooksInstalled) notifyHooksNeedTrust();
 }
 
 module.exports = { seedCodexForwardScript, configureCodexHooks };

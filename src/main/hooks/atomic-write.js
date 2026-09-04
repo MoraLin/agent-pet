@@ -26,6 +26,7 @@ function writeJsonAtomic(targetPath, data, { successEvent, failureEvent }) {
     }
     fs.renameSync(tempPath, targetPath);
     logEvent({ source: "app", event: successEvent });
+    return true;
   } catch (err) {
     try {
       fs.rmSync(tempPath, { force: true });
@@ -33,6 +34,7 @@ function writeJsonAtomic(targetPath, data, { successEvent, failureEvent }) {
       // best-effort cleanup only
     }
     logEvent({ source: "app", event: failureEvent, error: String(err) });
+    return false;
   }
 }
 
