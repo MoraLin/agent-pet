@@ -148,3 +148,108 @@ jobs:
             dist/Agent-Pet-arm64.dmg \
             dist/Agent-Pet-x64.dmg \
             dist/Agent-Pet-win.exe
+
+  sync-website-version:
+    name: Sync stable version to agent-pet-site
+    needs: [verify-version, release]
+    if: >-
+      ${{
+        startsWith(github.ref, 'refs/tags/') &&
+        needs.verify-version.outputs.is_prerelease == 'false' &&
+        needs.release.result == 'success'
+      }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      WEBSITE_TOKEN: ${{ secrets.AGENT_PET_SITE_TOKEN }}
+    steps:
+      - name: Verify AGENT_PET_SITE_TOKEN is configured
+        run: |
+          if [ -z "$WEBSITE_TOKEN" ]; then
+            echo "::error::AGENT_PET_SITE_TOKEN is not configured"
+            exit 1
+          fi
+
+      - name: Check out website repository
+        uses: actions/checkout@v4
+        with:
+          repository: MoraLin/agent-pet-site
+          ref: main
+          token: ${{ secrets.AGENT_PET_SITE_TOKEN }}
+          path: agent-pet-site
+          persist-credentials: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Compare and sync website version
+        id: sync
+        working-directory: agent-pet-site
+        env:
+          RELEASE_VERSION: ${{ github.ref_name }}
+        run: |
+          RELEASE_VERSION="${RELEASE_VERSION#v}"
+          WEBSITE_VERSION=$(node -p "require('./package.json').version")
+
+          node -e '
+            const [website, release] = process.argv.slice(1);
+            const parse = (value) => {
+              if (!/^(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)$/.test(value)) {
+                console.error(`Invalid stable semver: ${value}`);
+                process.exit(2);
+              }
+              return value.split(".").map(Number);
+            };
+            const left = parse(website);
+            const right = parse(release);
+            const comparison = left.findIndex((part, index) => part !== right[index]);
+            if (comparison >= 0 && left[comparison] > right[comparison]) process.exit(1);
+          ' "$WEBSITE_VERSION" "$RELEASE_VERSION" || {
+            status=$?
+            if [ "$status" -eq 1 ]; then
+              echo "::error::Version regression refused: website v${WEBSITE_VERSION} is newer than release v${RELEASE_VERSION}"
+            fi
+            exit "$status"
+          }
+
+          if [ "$WEBSITE_VERSION" = "$RELEASE_VERSION" ]; then
+            echo "Website is already at v${RELEASE_VERSION}; no commit required."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          npm version "$RELEASE_VERSION" --no-git-tag-version --ignore-scripts
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Verify version-only diff
+        if: steps.sync.outputs.changed == 'true'
+        working-directory: agent-pet-site
+        run: |
+          CHANGED_FILES=$(git diff --name-only)
+          UNEXPECTED_FILES=$(printf '%s\n' "$CHANGED_FILES" | grep -Ev '^(package.json|package-lock.json)$' || true)
+          if [ -n "$UNEXPECTED_FILES" ]; then
+            echo "::error::npm version changed unexpected files:"
+            printf '%s\n' "$UNEXPECTED_FILES"
+            exit 1
+          fi
+          git diff --check
+          git diff --exit-code -- package-lock.json package.json >/dev/null && {
+            echo "::error::Expected a version diff but none was produced"
+            exit 1
+          }
+          git diff -- package.json package-lock.json
+
+      - name: Commit and push website version
+        if: steps.sync.outputs.changed == 'true'
+        working-directory: agent-pet-site
+        env:
+          RELEASE_VERSION: ${{ github.ref_name }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json
+          git commit -m "chore(release): sync Agent Pet ${RELEASE_VERSION}"
+          git push origin HEAD:main
