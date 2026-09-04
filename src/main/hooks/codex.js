@@ -1,6 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
+const { execFileSync } = require("child_process");
 const paths = require("../paths");
 const { logEvent } = require("../logger");
 const { writeJsonAtomic } = require("./atomic-write");
@@ -41,18 +42,41 @@ function isOurCodexHookCommand(cmd) {
   );
 }
 
+// Whether a plain `node` on PATH can actually run - same thing Codex's
+// spawned shell would try. Checked fresh each call (cheap - a few ms) rather
+// than cached, since it only ever runs once per app startup anyway.
+function hasSystemNode() {
+  try {
+    execFileSync("node", ["--version"], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // Codex runs "command" hooks through the system shell (cmd.exe /c on
 // Windows, the user's $SHELL on POSIX), whose PATH frequently has no `node`
 // on it at all - Codex CLI ships its own private Node runtime that it never
 // adds to PATH, so a plain `node "..."` command silently fails to spawn and
 // the hook never fires (see https://github.com/openai/codex hooks docs).
-// Rather than depend on the user having a separate Node install, run the
+//
+// Codex also requires the user to re-review/trust a hook in `/hooks`
+// whenever its exact command text changes (it hashes the command), so this
+// only switches away from plain `node` on machines where it's actually
+// missing - anyone whose `node "..."` already works keeps that exact
+// command forever and never gets silently re-flagged for review after an
+// app update. Machines without a system `node` fall back to running the
 // forward script with this Electron app's own binary, which behaves as a
 // plain Node runtime when ELECTRON_RUN_AS_NODE=1 is set - guaranteed to
-// exist since it's the same binary already running the pet.
+// exist since it's the same binary already running the pet. Those machines
+// do need a one-time re-trust in Codex's `/hooks` UI, but they were already
+// receiving no events at all, so that's a strict improvement.
 function buildCodexHookCommand() {
-  const execPath = process.execPath;
   const script = paths.CODEX_FORWARD_SCRIPT_LIVE;
+  if (hasSystemNode()) {
+    return `node "${script}"`;
+  }
+  const execPath = process.execPath;
   return process.platform === "win32"
     ? `set ELECTRON_RUN_AS_NODE=1 && "${execPath}" "${script}"`
     : `ELECTRON_RUN_AS_NODE=1 "${execPath}" "${script}"`;
