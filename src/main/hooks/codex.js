@@ -46,9 +46,25 @@ function isOurCodexHookCommand(cmd) {
 // Whether a plain `node` on PATH can actually run - same thing Codex's
 // spawned shell would try. Checked fresh each call (cheap - a few ms) rather
 // than cached, since it only ever runs once per app startup anyway.
+//
+// On POSIX this deliberately checks through a login shell rather than just
+// this process's own inherited PATH - a GUI-launched Electron app typically
+// inherits launchd's minimal PATH, missing nvm/Homebrew-style PATH
+// additions that only get set up in .zprofile/.bashrc etc, which is exactly
+// what a login shell (-l) sources. That's a closer match for what Codex's
+// own spawned $SHELL would see than this process's own environment is -
+// checking the latter could wrongly conclude `node` is missing and force an
+// avoidable switch to the Electron-runtime fallback (and the Codex re-trust
+// that comes with it) for a user who never needed it.
 function hasSystemNode() {
   try {
-    execFileSync("node", ["--version"], { stdio: "ignore" });
+    if (process.platform === "win32") {
+      execFileSync("node", ["--version"], { stdio: "ignore" });
+    } else {
+      execFileSync(process.env.SHELL || "/bin/sh", ["-lc", "command -v node"], {
+        stdio: "ignore",
+      });
+    }
     return true;
   } catch {
     return false;
@@ -131,8 +147,21 @@ function seedCodexForwardScript() {
 // window (that's a transparent always-on-top overlay, not a normal window)
 // and doesn't block configureCodexHooks()'s caller - it just pops up on its
 // own alongside the pet.
+//
+// noticeWindow is module-level, not a local variable inside
+// notifyHooksNeedTrust() - a BrowserWindow with no surviving JS reference is
+// eligible for GC at any point, which can close it out from under the user
+// before they've even read it (Electron's own documented gotcha). This is
+// the only thing that tells them to go re-trust in Codex, so losing it
+// silently would defeat the entire point of this feature.
+let noticeWindow = null;
+
 function notifyHooksNeedTrust() {
-  const notice = new BrowserWindow({
+  if (noticeWindow && !noticeWindow.isDestroyed()) {
+    noticeWindow.focus();
+    return;
+  }
+  noticeWindow = new BrowserWindow({
     width: 460,
     height: 230,
     center: true,
@@ -148,7 +177,10 @@ function notifyHooksNeedTrust() {
       sandbox: true,
     },
   });
-  notice.loadFile(paths.CODEX_HOOKS_NOTICE_HTML);
+  noticeWindow.on("closed", () => {
+    noticeWindow = null;
+  });
+  noticeWindow.loadFile(paths.CODEX_HOOKS_NOTICE_HTML);
 }
 
 function configureCodexHooks() {
