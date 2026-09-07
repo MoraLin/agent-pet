@@ -197,7 +197,7 @@ jobs:
           node -e '
             const [website, release] = process.argv.slice(1);
             const parse = (value) => {
-              if (!/^(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)$/.test(value)) {
+              if (!/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/.test(value)) {
                 console.error(`Invalid stable semver: ${value}`);
                 process.exit(2);
               }
