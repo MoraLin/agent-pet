@@ -77,10 +77,28 @@ function buildCodexHookCommand() {
   if (hasSystemNode()) {
     return `node "${script}"`;
   }
-  const execPath = process.execPath;
+  // electron-builder's Windows portable target re-extracts to a fresh temp
+  // directory on every launch, so process.execPath can point at an
+  // ephemeral per-launch copy that's already gone by the time Codex spawns
+  // this command later. PORTABLE_EXECUTABLE_FILE is electron-builder's own
+  // escape hatch pointing at the stable .exe the user actually launched
+  // (see electron-builder's PortableOptions docs) - prefer it when set
+  // (only ever set on the Windows portable build; undefined everywhere
+  // else, where process.execPath is already stable).
+  const execPath = process.env.PORTABLE_EXECUTABLE_FILE || process.execPath;
+  // --preserve-symlinks: without it, Node's CommonJS module resolution
+  // walks up from the script's own path doing an lstat at every directory
+  // level to canonicalize it (fs.realpathSync) - on a locked-down/AV-
+  // monitored Windows machine this can throw EPERM on the bare home
+  // directory itself. Confirmed with a real user: the identical script ran
+  // fine spawned via Codex's own bundled node.exe, and only failed when run
+  // as this Electron binary - Electron's asar-aware fs patching likely adds
+  // extra stat calls beyond what plain Node does, one of which trips
+  // whatever is blocking these lstats. This flag skips that walk entirely;
+  // harmless everywhere else since this script has no symlinks to preserve.
   return process.platform === "win32"
-    ? `set ELECTRON_RUN_AS_NODE=1 && "${execPath}" "${script}"`
-    : `ELECTRON_RUN_AS_NODE=1 "${execPath}" "${script}"`;
+    ? `set ELECTRON_RUN_AS_NODE=1 && "${execPath}" --preserve-symlinks "${script}"`
+    : `ELECTRON_RUN_AS_NODE=1 "${execPath}" --preserve-symlinks "${script}"`;
 }
 
 // The command built by buildCodexHookCommand() can't read inside a packaged
