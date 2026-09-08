@@ -142,8 +142,8 @@ Codex hook 設定好之後寵物還是沒反應,先確認 Codex 裡有沒有跳�
 
 ## 授權(License)
 
-原始碼採用 MIT License,詳見 [`LICENSE`](./LICENSE)。**寵物 GIF 素材跟部分圖示不在 MIT 授權範圍內**,詳見 [`ASSETS-LICENSE.md`](./ASSETS-LICENSE.md)。
+原始碼採用 MIT License,詳見 [`LICENSE`](./LICENSE)。**寵物 GIF 素材跟部分圖示不在 MIT 授權範圍內**,詳見 [`ASSETS-LICENSE.md`](./docs/ASSETS-LICENSE.md)。
 
-安全性問題回報請見 [`SECURITY.md`](./SECURITY.md);想貢獻程式碼請見 [`CONTRIBUTING.md`](./CONTRIBUTING.md)。
+安全性問題回報請見 [`SECURITY.md`](./docs/SECURITY.md);想貢獻程式碼請見 [`CONTRIBUTING.md`](./docs/CONTRIBUTING.md)。
 
-新增/修改動畫的規範跟踩過的坑,見 `ANIMATION_GUIDELINES.md`。
+新增/修改動畫的規範跟踩過的坑,見 `docs/ANIMATION_GUIDELINES.md`。

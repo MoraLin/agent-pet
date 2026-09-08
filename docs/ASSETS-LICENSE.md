@@ -1,6 +1,6 @@
 # Assets License
 
-The [MIT License](./LICENSE) in this repository covers the **source code
+The [MIT License](../LICENSE) in this repository covers the **source code
 only** (all `.js`, `.html`, `.css` files, build scripts, and configuration).
 It does **not** automatically extend to the bundled artwork below. Each
 asset group is licensed as stated here.

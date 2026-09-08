@@ -1,7 +1,7 @@
 // Optional idle flourish - resolveGif(..., false) returns null if this skin
 // has no dedicated eating gif, in which case scheduleRandomEat() never
 // actually triggers and idle behaves exactly as before (see
-// ANIMATION_GUIDELINES.md's optional-keyword pattern, same as look-left-side).
+// docs/ANIMATION_GUIDELINES.md's optional-keyword pattern, same as look-left-side).
 const EAT_SRC = resolveGif('eating', false);
 
 const EAT_DURATION_MS = 2500;
@@ -16,7 +16,7 @@ function enterEat() {
   setEmote('');
   // Not enterOverride() - this is a self-triggered idle flourish, not a hook
   // reaction, so it must not touch the boredom timer (see
-  // ANIMATION_GUIDELINES.md section 2).
+  // docs/ANIMATION_GUIDELINES.md section 2).
   overrideTimeoutId = setTimeout(() => {
     enterAuto();
   }, EAT_DURATION_MS);

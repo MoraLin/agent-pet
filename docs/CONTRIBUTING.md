@@ -9,7 +9,7 @@ pnpm install
 pnpm start
 ```
 
-See [README.md](./README.md) for full development, build, and packaging
+See [README.md](../README.md) for full development, build, and packaging
 instructions.
 
 ## Before opening a pull request

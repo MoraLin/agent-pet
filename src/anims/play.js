@@ -1,7 +1,7 @@
 // Optional idle flourish - resolveGif(..., false) returns null if this skin
 // has no dedicated playing gif, in which case scheduleRandomPlay() never
 // actually triggers and idle behaves exactly as before (see
-// ANIMATION_GUIDELINES.md's optional-keyword pattern, same as look-left-side).
+// docs/ANIMATION_GUIDELINES.md's optional-keyword pattern, same as look-left-side).
 const PLAY_SRC = resolveGif('playing', false);
 
 const PLAY_DURATION_MS = 2500;
@@ -16,7 +16,7 @@ function enterPlay() {
   setEmote('');
   // Not enterOverride() - this is a self-triggered idle flourish, not a hook
   // reaction, so it must not touch the boredom timer (see
-  // ANIMATION_GUIDELINES.md section 2).
+  // docs/ANIMATION_GUIDELINES.md section 2).
   overrideTimeoutId = setTimeout(() => {
     enterAuto();
   }, PLAY_DURATION_MS);

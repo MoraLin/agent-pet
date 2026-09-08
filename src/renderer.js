@@ -299,7 +299,7 @@ function setBoredomMs(ms) {
 }
 
 // jump/run/eat/play each define their own frames, entry function, and
-// scheduleRandomX() in src/anims/<name>.js - see ANIMATION_GUIDELINES.md.
+// scheduleRandomX() in src/anims/<name>.js - see docs/ANIMATION_GUIDELINES.md.
 // They're loaded as plain scripts after this one, so they share this file's
 // top-level scope (mode, x/y/dir, setAnim, enterAuto, etc.) directly.
 
