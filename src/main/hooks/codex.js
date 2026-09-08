@@ -218,9 +218,9 @@ function configureCodexHooks() {
     // Drop stale copies of our own hook (old app-identity paths) before
     // deciding whether to add the current one - a plain exact-match check
     // has no way to recognize "this is an old version of us", so it only
-    // ever appended, never pruned (review Finding 3). Anything that isn't
-    // our own command - including a user's own unrelated hooks on the same
-    // event - is left untouched.
+    // ever appended, never pruned. Anything that isn't our own command -
+    // including a user's own unrelated hooks on the same event - is left
+    // untouched.
     let prunedAny = false;
     const prunedEntries = (config.hooks[event] || [])
       .map((entry) => {

@@ -13,8 +13,7 @@ const RESOLUTION_EVENTS = new Set([
 // Real hook payloads are a handful of short string fields (cwd, tool name,
 // session id) - nothing legitimate should ever approach this. There's no
 // auth on this endpoint (any local process can POST here), so without a cap
-// an unbounded body would grow `body` without limit and exhaust memory
-// (review Finding 6).
+// an unbounded body would grow `body` without limit and exhaust memory.
 const MAX_BODY_BYTES = 64 * 1024; // 64KB
 
 function startServer(port, win) {
@@ -69,11 +68,11 @@ function startServer(port, win) {
         // sharing the same missing-ness) would otherwise collide on the
         // literal `undefined` key, silently clobbering an unrelated
         // session's timers/alert the same way two real sessions used to
-        // before session_id was used as the key at all (see review Finding
-        // 5). Sessions genuinely don't need session_id for events that
-        // never touch that state (SessionStart, a non-Bash PreToolUse,
-        // PreCompact/PostCompact), so those are left completely alone here
-        // and still reach sendToPet() below as normal.
+        // before session_id was used as the key at all. Sessions genuinely
+        // don't need session_id for events that never touch that state
+        // (SessionStart, a non-Bash PreToolUse, PreCompact/PostCompact), so
+        // those are left completely alone here and still reach sendToPet()
+        // below as normal.
         const rawSessionId = payload && payload.session_id;
         const sessionId =
           typeof rawSessionId === "string" && rawSessionId.length > 0
@@ -156,9 +155,9 @@ function startServer(port, win) {
   // createWindow() already ran before startServer() in the startup sequence,
   // so the pet was already on screen doing its normal idle animation by the
   // time this async error fires, with nothing telling the user it can never
-  // receive a single Claude Code/Codex event again (review Finding 4). The
-  // hook server isn't an optional feature of this app - a failure to bind
-  // is fatal: surface it clearly and quit, rather than run indefinitely in
+  // receive a single Claude Code/Codex event again. The hook server isn't
+  // an optional feature of this app - a failure to bind is fatal: surface it
+  // clearly and quit, rather than run indefinitely in
   // a "looks alive, is deaf" state. Guarded so this can't run twice -
   // listen() is only ever called once here, but the app should still only
   // ever show one dialog/exit once no matter what.

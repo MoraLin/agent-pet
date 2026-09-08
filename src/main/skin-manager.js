@@ -92,12 +92,11 @@ async function importSkin(win, applyAlwaysOnTop) {
     }
 
     // Stage the new skin fully in a sibling temp directory and only touch
-    // SKIN_LIVE_DIR once that staged copy is proven complete (review
-    // Finding 1) - the old delete-then-copy order left the live skin
-    // deleted-but-not-yet-replaced if any individual copy failed partway
-    // (disk full, a source file disappearing mid-loop), with no way for
-    // seedSkinDirIfNeeded() to notice and repair it since the folder
-    // wasn't empty, just broken.
+    // SKIN_LIVE_DIR once that staged copy is proven complete - the old
+    // delete-then-copy order left the live skin deleted-but-not-yet-replaced
+    // if any individual copy failed partway (disk full, a source file
+    // disappearing mid-loop), with no way for seedSkinDirIfNeeded() to
+    // notice and repair it since the folder wasn't empty, just broken.
     //
     // The live-directory swap itself is two renames, not one - a single
     // rename can't portably replace an existing non-empty directory
