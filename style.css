@@ -100,6 +100,12 @@ html, body {
      (not one-shot) so it stays clearly visible for the whole ~3s the
      checkmark is on screen, unlike the brief pop-in this replaced. */
   animation: fa-flip 2s linear infinite;
+  /* Without this, the browser renders the element's mirrored backface as it
+     rotates past 90deg - in this app's transparent/frameless/always-on-top
+     overlay window, that backface pass can briefly composite as a garbled
+     "broken image" glyph instead of a clean edge-on sliver. Hiding it keeps
+     the flip looking like a flip instead of a rendering glitch. */
+  backface-visibility: hidden;
 }
 
 @keyframes fa-flip {
