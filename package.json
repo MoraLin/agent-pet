@@ -1,6 +1,6 @@
 {
   "name": "agent-pet",
-  "version": "1.3.1",
+  "version": "1.4.0",
   "description": "Desktop pet that reacts to Claude Code and Codex CLI hook events - skin it with any compatible GIF pack (e.g. from codex-pets.net)",
   "author": "Mora Lin",
   "main": "main.js",
