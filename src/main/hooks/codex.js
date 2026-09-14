@@ -260,4 +260,55 @@ function configureCodexHooks() {
   if (wrote && codexLooksInstalled) notifyHooksNeedTrust();
 }
 
-module.exports = { seedCodexForwardScript, configureCodexHooks };
+// Undoes configureCodexHooks() on quit, the same way removeClaudeHooks()
+// undoes hooks/claude.js - otherwise ~/.codex/hooks.json keeps pointing at
+// codex-hook-forward.js forever with nothing left running to receive what
+// it forwards. Reuses isOurCodexHookCommand() (already used above to prune
+// stale copies of our own command) rather than an exact match against the
+// current buildCodexHookCommand(), so this still cleans up correctly even
+// if the command shape changed since the hook was added (an app rename, a
+// userData relocation, a hasSystemNode() fallback flip) - all of those
+// produce a command isOurCodexHookCommand() still recognizes as ours.
+function removeCodexHooks() {
+  const hooksPath = path.join(os.homedir(), ".codex", "hooks.json");
+  if (!fs.existsSync(hooksPath)) return;
+
+  let config;
+  try {
+    config = JSON.parse(fs.readFileSync(hooksPath, "utf8"));
+  } catch (err) {
+    logEvent({
+      source: "app",
+      event: "codex_hooks_config_parse_failed",
+      error: String(err),
+    });
+    return;
+  }
+
+  if (!config.hooks) return;
+
+  let changed = false;
+  for (const event of Object.keys(config.hooks)) {
+    const entries = config.hooks[event];
+    if (!Array.isArray(entries)) continue;
+    const prunedEntries = entries
+      .map((entry) => {
+        const keptHooks = (entry.hooks || []).filter(
+          (h) => !(h.type === "command" && isOurCodexHookCommand(h.command)),
+        );
+        if (keptHooks.length !== (entry.hooks || []).length) changed = true;
+        return { ...entry, hooks: keptHooks };
+      })
+      .filter((entry) => entry.hooks.length > 0);
+    config.hooks[event] = prunedEntries;
+  }
+
+  if (!changed) return;
+
+  writeJsonAtomic(hooksPath, config, {
+    successEvent: "codex_hooks_removed",
+    failureEvent: "codex_hooks_removal_write_failed",
+  });
+}
+
+module.exports = { seedCodexForwardScript, configureCodexHooks, removeCodexHooks };

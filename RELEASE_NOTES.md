@@ -1,21 +1,13 @@
-# Agent Pet v1.4.0
+# Agent Pet v1.5.0
 
 ## What's New
 
 ### Stability fixes
-- Fixed the success-checkmark animation occasionally flashing a broken-image icon partway through its spin.
-- Windows builds now correctly bundle the application icon.
-
-### Other changes
-- Replaced the Claude/Codex alert badge icons with generic Font Awesome icons.
+- Quitting the pet now removes the Claude Code / Codex hooks it registered on startup. Previously they were left behind pointing at a port nothing was listening on, so every hook call (e.g. `PreToolUse:Bash`) would fail with a connection error until the pet was reopened.
 
 ---
 
 ## 中文
 
 ### 穩定性修復
-- 修復成功打勾動畫轉圈時，偶爾會閃出破圖圖示的問題。
-- 修復 Windows 建置沒有正確帶上應用程式圖示的問題。
-
-### 其他變更
-- 把 Claude/Codex 提示徽章圖示換成通用的 Font Awesome 圖示。
+- 關閉寵物時，現在會一併移除它啟動時註冊給 Claude Code / Codex 的 hook。先前這些 hook 會留在設定檔裡，繼續指向一個沒有任何東西在監聽的 port，導致每次觸發 hook（例如 `PreToolUse:Bash`）都會跳出連線失敗的錯誤，直到重新打開寵物為止。
