@@ -72,4 +72,57 @@ function configureClaudeHooks(port) {
   });
 }
 
-module.exports = { configureClaudeHooks };
+// Undoes configureClaudeHooks() on quit - otherwise the entries it wrote
+// stay in settings.json forever (nothing else ever cleans them up), so
+// every future Claude Code session keeps POSTing to a port nothing is
+// listening on anymore and surfaces a hook error on every single tool call.
+// Matches entries purely by exact type+url, the same test configureClaudeHooks()
+// itself uses to detect "already configured" - so this only ever removes the
+// hook object this app added, never a user's own hooks on the same event,
+// even ones that happen to share the event name.
+function removeClaudeHooks(port) {
+  const hookUrl = `http://localhost:${port}/event`;
+  const settingsPath = path.join(os.homedir(), ".claude", "settings.json");
+  if (!fs.existsSync(settingsPath)) return;
+
+  let settings;
+  try {
+    settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+  } catch (err) {
+    // Same reasoning as configureClaudeHooks(): don't touch a file we can't
+    // safely parse.
+    logEvent({
+      source: "app",
+      event: "hooks_config_parse_failed",
+      error: String(err),
+    });
+    return;
+  }
+
+  if (!settings.hooks) return;
+
+  let changed = false;
+  for (const event of Object.keys(settings.hooks)) {
+    const entries = settings.hooks[event];
+    if (!Array.isArray(entries)) continue;
+    const prunedEntries = entries
+      .map((entry) => {
+        const keptHooks = (entry.hooks || []).filter(
+          (h) => !(h.type === "http" && h.url === hookUrl),
+        );
+        if (keptHooks.length !== (entry.hooks || []).length) changed = true;
+        return { ...entry, hooks: keptHooks };
+      })
+      .filter((entry) => entry.hooks.length > 0);
+    settings.hooks[event] = prunedEntries;
+  }
+
+  if (!changed) return;
+
+  writeJsonAtomic(settingsPath, settings, {
+    successEvent: "hooks_removed",
+    failureEvent: "hooks_removal_write_failed",
+  });
+}
+
+module.exports = { configureClaudeHooks, removeClaudeHooks };

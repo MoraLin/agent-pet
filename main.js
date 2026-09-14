@@ -27,6 +27,20 @@ if (!app.requestSingleInstanceLock()) {
     }
   });
 
+  // Registered only in this branch - the one that actually held the single-
+  // instance lock and is the real running pet. A duplicate launch attempt
+  // takes the `if` branch above instead and calls app.quit() without ever
+  // reaching here, so it never registers this and can't fire it. That
+  // matters: before-quit fires independent of whenReady(), so if this were
+  // registered unconditionally at module scope, that doomed second process
+  // quitting would run removeClaudeHooks()/removeCodexHooks() too - ripping
+  // out the hooks the real, still-running first instance needs, even though
+  // nobody asked to quit it.
+  app.on("before-quit", () => {
+    claudeHooks.removeClaudeHooks(PORT);
+    codexHooks.removeCodexHooks();
+  });
+
   app.whenReady().then(() => {
     logger.logEvent({ source: "app", event: "started", pid: process.pid });
     if (process.platform === "darwin") {
