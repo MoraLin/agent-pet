@@ -312,6 +312,7 @@ function enterAuto() {
     enterSleep();
     return;
   }
+  clearSleepGlanceTimer();
   mode = 'auto';
   overrideMoving = false;
   setEmote('');
@@ -330,6 +331,34 @@ function enterSleep() {
   clearAutoSubTimer();
   setAnim('anim-sleep');
   setEmote('');
+  scheduleSleepGlance();
+}
+
+// While asleep, flip which side it's facing every SLEEP_GLANCE_MS instead of
+// staying frozen on whichever side it happened to fall asleep facing -
+// purely cosmetic (no movement), just swaps SLEEP_LEFT_SRC/SLEEP_RIGHT_SRC
+// via the same setDirectionalGif() the sleep pose already uses. Fixed
+// interval, not randomized like scheduleAutoSub's idle/walk timing - this is
+// meant to read as one continuous back-and-forth, not a lifelike variable
+// pause.
+let sleepGlanceTimeoutId = null;
+const SLEEP_GLANCE_MS = 1000;
+
+function clearSleepGlanceTimer() {
+  if (sleepGlanceTimeoutId) {
+    clearTimeout(sleepGlanceTimeoutId);
+    sleepGlanceTimeoutId = null;
+  }
+}
+
+function scheduleSleepGlance() {
+  clearSleepGlanceTimer();
+  sleepGlanceTimeoutId = setTimeout(() => {
+    if (mode !== 'sleep') return;
+    dir = -dir;
+    setDirectionalGif();
+    scheduleSleepGlance();
+  }, SLEEP_GLANCE_MS);
 }
 
 function setWanderEnabled(enabled) {
@@ -344,6 +373,7 @@ function setWanderEnabled(enabled) {
 function enterOverride(animClass, emoji, duration, moveToCorner, onEnd, keepBoredom, iconSrc) {
   mode = 'override';
   clearAutoSubTimer();
+  clearSleepGlanceTimer();
   if (overrideTimeoutId) clearTimeout(overrideTimeoutId);
   if (!keepBoredom) resetBoredom();
   setAnim(animClass);
@@ -369,6 +399,7 @@ function enterOverride(animClass, emoji, duration, moveToCorner, onEnd, keepBore
 function enterCornerWorking() {
   mode = 'override';
   clearAutoSubTimer();
+  clearSleepGlanceTimer();
   overrideMoving = true;
   targetX = viewW - WRAP_SIZE - CORNER_MARGIN;
   targetY = CORNER_MARGIN_TOP;
@@ -700,6 +731,7 @@ const PAT_SWAY_PER_PX = 0.15;
 
 function startPat() {
   clearAutoSubTimer();
+  clearSleepGlanceTimer();
   if (overrideTimeoutId) clearTimeout(overrideTimeoutId);
   resetBoredom();
   mode = 'pat';
